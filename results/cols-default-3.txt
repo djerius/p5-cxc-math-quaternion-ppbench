@@ -1,0 +1,21 @@
+max |diff|: rotq3 0.0e+00  glue 0.0e+00  xchg-view 0.0e+00  fill 0.0e+00
+PDL 2.106, autopthread targ = 8, MALLOC_MMAP_THRESHOLD_=default
+
+(1) building a (3,N) ndarray from three (N) columns: ns per vector
+        N  cat+xchg+copy      glue fill prealloc
+    1e+02          324.3     359.9         154.4
+    1e+03           62.9      43.6          16.9
+    1e+04           60.9      27.5           4.4
+    1e+05           67.1       9.3           3.4
+    1e+06           76.4       9.9           6.3
+    1e+07           73.4      31.3           8.1
+
+(2) rotating: ns per vector
+        N rotq(3,N) rotq(N,3)^T |    cat+xchg  cat+xchg+copy      glue fill prealloc |     rotq3 rotq3 prealloc
+               --- no build --- |              ------- build (3,N), then rotq ------- | ---- columns direct ----
+    1e+02      30.7        45.0 |       240.5          300.4     350.8         166.6 |      54.8          24.3
+    1e+03       8.6        10.2 |        32.6           71.8      51.8          25.8 |      11.4           7.8
+    1e+04       6.3         6.6 |        11.5           47.2      17.8          10.8 |       7.3           6.3
+    1e+05       6.9         6.1 |        12.0           55.0      18.2          10.1 |       7.1           6.7
+    1e+06       4.2         4.4 |        37.6           83.6      52.2          10.1 |       7.7           6.3
+    1e+07      18.8        18.6 |        35.3           82.6      49.6          11.0 |      20.1           3.7

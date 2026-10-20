@@ -1,0 +1,10 @@
+operation (ns per call)                           N=1   N=1000
+zeroes(3,N)                  [Core.pm wrapper]     1255     1998
+PDL->zeroes(3,N)             [XS directly]       1168     1900
+PDL->new_from_specification($D,3,N)  [no data]     1045     1042
+  ... ->make_physical                            1158     1865
+rotq($q,$v)                  [kernel allocs]     1580     7878
+rotq($q,$v,$r)               [preallocated]      1244     7247
+rotq($q,$v,zeroes(3,N))                          2605    10699
+rotq($q,$v,PDL->zeroes(3,N))                     2349     9308
+rotq($q,$v,PDL->new_from_spec($D,3,N))           2169     9003

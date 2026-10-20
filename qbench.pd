@@ -1,0 +1,33 @@
+pp_bless('QBench');
+# scalar-last quaternion q = (x,y,z,w); v' = q v q*  (Hamilton)
+# v' = v + 2w(u x v) + 2 u x (u x v), u = (x,y,z)
+pp_def('rotq',
+  Pars => 'q(n=4); v(m=3); [o] r(m=3);',
+  GenericTypes => ['D'],
+  Code => q{
+    double x=$q(n=>0), y=$q(n=>1), z=$q(n=>2), w=$q(n=>3);
+    double a=$v(m=>0), b=$v(m=>1), c=$v(m=>2);
+    double tx = 2*(y*c - z*b), ty = 2*(z*a - x*c), tz = 2*(x*b - y*a);
+    $r(m=>0) = a + w*tx + (y*tz - z*ty);
+    $r(m=>1) = b + w*ty + (z*tx - x*tz);
+    $r(m=>2) = c + w*tz + (x*ty - y*tx);
+  });
+pp_def('rotm',
+  Pars => 'mat(i=3,j=3); v(i); [o] r(j);',
+  GenericTypes => ['D'],
+  Code => q{
+    loop(j) %{ double s=0; loop(i) %{ s += $mat() * $v(); %} $r() = s; %}
+  });
+# same rotation, vector given as three separate columns (x, y, z each of shape (N))
+pp_def('rotq3',
+  Pars => 'q(n=4); a(); b(); c(); [o] ra(); [o] rb(); [o] rc();',
+  GenericTypes => ['D'],
+  Code => q{
+    double x=$q(n=>0), y=$q(n=>1), z=$q(n=>2), w=$q(n=>3);
+    double a=$a(), b=$b(), c=$c();
+    double tx = 2*(y*c - z*b), ty = 2*(z*a - x*c), tz = 2*(x*b - y*a);
+    $ra() = a + w*tx + (y*tz - z*ty);
+    $rb() = b + w*ty + (z*tx - x*tz);
+    $rc() = c + w*tz + (x*ty - y*tx);
+  });
+pp_done();

@@ -2,6 +2,50 @@
 
 Claude did this.
 
+## Contents
+
+- [Building and running](#building-and-running)
+  - [Requirements](#requirements)
+  - [Build](#build)
+  - [Run](#run)
+- [Hypotheses](#hypotheses)
+- [Setup](#setup)
+  - [Code](#code)
+  - [Method](#method)
+- [Results](#results)
+  - [One quaternion, N vectors (bench.pl)](#one-quaternion-n-vectors-benchpl)
+  - [N quaternions, N vectors (one each)](#n-quaternions-n-vectors-one-each)
+  - [Allocation and threading (alloc.pl)](#allocation-and-threading-allocpl)
+  - [glibc mmap threshold (mmap.pl, new out only)](#glibc-mmap-threshold-mmappl-new-out-only)
+  - [Page faults per call (faults.pl)](#page-faults-per-call-faultspl)
+- [Analysis](#analysis)
+  - [H1: the PP kernel wins (confirmed)](#h1-the-pp-kernel-wins-confirmed)
+  - [H2: quaternion kernel vs. matrix kernel (confirmed)](#h2-quaternion-kernel-vs-matrix-kernel-confirmed)
+  - [H3: the large-N slowdown is allocation, not the kernel (H3a confirmed, H3b rejected)](#h3-the-large-n-slowdown-is-allocation-not-the-kernel-h3a-confirmed-h3b-rejected)
+  - [Threading](#threading)
+- [Conclusions](#conclusions)
+- [Column-layout input](#column-layout-input)
+  - [Question](#question)
+  - [Hypotheses](#hypotheses-1)
+  - [Benchmarks (cols.pl)](#benchmarks-colspl)
+  - [Results](#results-1)
+  - [Analysis](#analysis-1)
+  - [Conclusions for column-layout data](#conclusions-for-column-layout-data)
+- [Allocating outputs without zero-filling](#allocating-outputs-without-zero-filling)
+  - [Question and hypothesis](#question-and-hypothesis)
+  - [Benchmark (nfs.pl)](#benchmark-nfspl)
+  - [Results](#results-2)
+  - [Analysis](#analysis-2)
+  - [Conclusions for output allocation](#conclusions-for-output-allocation)
+- [Pure-Perl baseline](#pure-perl-baseline)
+  - [Question](#question-1)
+  - [Hypotheses](#hypotheses-2)
+  - [Benchmark (pureperl.pl)](#benchmark-pureperlpl)
+  - [Results](#results-3)
+  - [Analysis](#analysis-3)
+  - [Conclusions for the pure-Perl implementation](#conclusions-for-the-pure-perl-implementation)
+- [Caveats and open questions](#caveats-and-open-questions)
+
 These benchmarks were run to help design `CXC::Math::Quaternion`. The
 question was how the vectorised quaternion code should be built:
 
@@ -59,6 +103,7 @@ perl cols.pl      # three-column input vs. (3,N)                   (~40 s)
 perl nfs.pl       # zeroes vs. new_from_specification outputs      (~35 s)
 perl ovh.pl       # fixed per-call costs at N = 1 and 1000         (~20 s)
 perl ovh2.pl      # ndarray construction vs. destruction           (~2 s)
+perl pureperl.pl  # pure-Perl rotation vs. PDL, conversions        (~2 min)
 ```
 
 To see the effect of glibc's mmap threshold, run [mmap.pl](mmap.pl),
@@ -95,7 +140,7 @@ run, so compare ratios rather than absolute numbers.
 
 ## Hypotheses
 
-1. **H1: a dedicated PP kernel beats the generic alternatives.** A PP
+1. <a id="h1"></a>**H1: a dedicated PP kernel beats the generic alternatives.** A PP
    kernel does the whole rotation in one pass over the data with no
    temporaries. It should beat:
    - plain PDL operations, which allocate a temporary for every
@@ -103,21 +148,21 @@ run, so compare ratios rather than absolute numbers.
    - `x` (matrix multiply);
    - `PDL::Transform::t_linear`, which adds Perl-level dispatch and
      generic machinery.
-2. **H2: rotating with the quaternion directly is at least as fast as
+2. <a id="h2"></a>**H2: rotating with the quaternion directly is at least as fast as
    building a 3×3 matrix and using that.** The quaternion form,
    $`v' = v + 2w(u \times v) + 2u \times (u \times v)`$ with
    $`u = (x,y,z)`$, needs about the same number of flops as a
    matrix–vector product. It also avoids the matrix construction and
    reads only 4 numbers instead of 9.
-3. **H3 (added after the first run): the slowdown at large $`N`$ comes
+3. <a id="h3"></a>**H3 (added after the first run): the slowdown at large $`N`$ comes
    from the kernel or from memory bandwidth.**
-   - **H3a:** it is from memory allocation, not from the kernel. glibc
+   - <a id="h3a"></a>**H3a:** it is from memory allocation, not from the kernel. glibc
      `malloc` serves blocks above the dynamic mmap threshold with fresh
      `mmap` calls. Its default ceiling is 32 MB on 64-bit systems. A
      fresh mapping is page-faulted in one 4 KiB page at a time when the
      kernel first writes to it, and it is unmapped again when the
      output piddle is freed. So every call pays that cost again.
-   - **H3b (alternative):** it is the memory bandwidth limit, reached
+   - <a id="h3b"></a>**H3b (alternative):** it is the memory bandwidth limit, reached
      once the working set falls out of the 8 MB L3 cache.
 
 ## Setup
@@ -182,6 +227,10 @@ run, so compare ratios rather than absolute numbers.
 - [ovh.pl](ovh.pl) and [ovh2.pl](ovh2.pl) measure fixed per-call
   costs at $`N = 1`$: creating ndarrays from Perl, versus outputs that
   the PP wrapper creates in C.
+- [pureperl.pl](pureperl.pl) times pure-Perl rotation in several
+  forms. It compares them with the PP kernels, both with data already
+  in ndarrays and with Perl data converted to ndarrays and back. See
+  [Pure-Perl baseline](#pure-perl-baseline).
 
 ### Method
 
@@ -200,7 +249,7 @@ run, so compare ratios rather than absolute numbers.
 
 ## Results
 
-### One quaternion, $`N`$ vectors ([bench.pl](bench.pl))
+### One quaternion, N vectors ([bench.pl](bench.pl))
 
 |     N | rotq(PP) | rotm(PP) | matmult | t_linear | PDL ops |
 |------:|---------:|---------:|--------:|---------:|--------:|
@@ -212,7 +261,7 @@ run, so compare ratios rather than absolute numbers.
 |  1e6  |      4.6 |      5.1 |    18.5 |    153.4 |    75.9 |
 |  1e7  |     16.2 |     17.1 |    29.1 |    154.0 |   105.8 |
 
-### $`N`$ quaternions, $`N`$ vectors (one each)
+### N quaternions, N vectors (one each)
 
 |     N | rotq(PP) | PDL ops |
 |------:|---------:|--------:|
@@ -250,7 +299,7 @@ The "pages in output" column is $`3 \cdot 8 \cdot N / 4096`$.
 
 ## Analysis
 
-### H1: the PP kernel wins (confirmed)
+### [H1](#h1): the PP kernel wins (confirmed)
 
 - `rotq(PP)` is the fastest at every $`N`$.
 - Plain matrix multiply (`x`) is 2–4× slower.
@@ -273,7 +322,7 @@ The "pages in output" column is $`3 \cdot 8 \cdot N / 4096`$.
   So scalar code paths, single quaternions and single vectors, will be
   dominated by PDL call overhead.
 
-### H2: quaternion kernel vs. matrix kernel (confirmed)
+### [H2](#h2): quaternion kernel vs. matrix kernel (confirmed)
 
 - While the data fits in cache ($`N \le 10^5`$), `rotq` is about 1.6–1.7×
   faster than `rotm`: 6.2 vs. 10.5 ns. `rotm`'s generic `loop(j)
@@ -287,7 +336,7 @@ The "pages in output" column is $`3 \cdot 8 \cdot N / 4096`$.
   many-quaternion case, because it would have to build $`N`$ matrices
   first.
 
-### H3: the large-$`N`$ slowdown is allocation, not the kernel (H3a confirmed, H3b rejected)
+### [H3](#h3): the large-N slowdown is allocation, not the kernel ([H3a](#h3a) confirmed, [H3b](#h3b) rejected)
 
 The first table shows a jump in `rotq` between $`10^6`$ (≈ 5 ns) and
 $`10^7`$ (≈ 16–20 ns). Three measurements isolate the cause:
@@ -295,7 +344,7 @@ $`10^7`$ (≈ 16–20 ns). Three measurements isolate the cause:
 1. **Preallocating the output removes the jump entirely.** With
    preallocation, `rotq` stays at 3.8–4.2 ns/vector all the way to
    $`3\times10^7`$ vectors (720 MB of input plus output), well past L3.
-   So the kernel and memory bandwidth are not the problem, and H3b is
+   So the kernel and memory bandwidth are not the problem, and [H3b](#h3b) is
    rejected.
 2. **The jump follows the glibc mmap ceiling, not the cache size.**
    - At $`N=10^6`$ the output is 24 MB. That is far larger than L3,
@@ -339,30 +388,34 @@ $`10^7`$ (≈ 16–20 ns). Three measurements isolate the cause:
 
 ## Conclusions
 
-1. **Write the `CXC::Math::Quaternion` vector core in PDL::PP.** It is
-   2–4× faster than `x` and 8–30× faster than `PDL::Transform`. It also
-   avoids every temporary that a composition of PDL operations
-   allocates.
-2. **Rotate directly with the quaternion formula; do not go through a
-   rotation matrix.** It is 1.7× faster in cache and equal when
-   memory-bound. Matrices remain useful as an output (`transform`), not
-   as the rotation path.
-3. **Use `PDL::Transform` only for what it uniquely provides**:
-   resampling/`map`, projections and composition. A thin
-   `to_transform` bridge is enough. Do not use it for bulk rotation.
-4. **Let PP functions accept a preallocated `[o]` output.** PDL::PP
-   already allows this. Document it as the way to avoid the mmap and
-   page-fault penalty for large repeated calls (outputs over 32 MB,
-   i.e. more than about 1.4 M 3-vectors or 1 M quaternions). Users who
-   cannot preallocate can raise `MALLOC_MMAP_THRESHOLD_`. That is an
-   environment-level setting, and the module should not set it.
-5. **Single-element operations are dominated by about 1.6 µs of PDL
-   call overhead.** That supports keeping a pure-Perl or scalar path
-   for the scalar API (single quaternion, single vector). How it
-   compares with pure Perl was not measured here and should be checked
-   before deciding.
-6. **Autopthreading helps less than 2× on this machine,** because the
-   kernel is bandwidth-bound. No custom threading work is warranted.
+Conclusions are numbered [C1](#c1)–[C19](#c19) through the whole document, like the
+hypotheses ([H1](#h1)–[H10](#h10)), so later sections can refer to earlier ones.
+
+- <a id="c1"></a>**C1: Write the `CXC::Math::Quaternion` vector core in PDL::PP.** It is
+  2–4× faster than `x` and 8–30× faster than `PDL::Transform`. It also
+  avoids every temporary that a composition of PDL operations
+  allocates.
+- <a id="c2"></a>**C2: Rotate directly with the quaternion formula; do not go through a
+  rotation matrix.** It is 1.7× faster in cache and equal when
+  memory-bound. Matrices remain useful as an output (`transform`), not
+  as the rotation path.
+- <a id="c3"></a>**C3: Use `PDL::Transform` only for what it uniquely provides**:
+  resampling/`map`, projections and composition. A thin
+  `to_transform` bridge is enough. Do not use it for bulk rotation.
+- <a id="c4"></a>**C4: Let PP functions accept a preallocated `[o]` output.** PDL::PP
+  already allows this. Document it as the way to avoid the mmap and
+  page-fault penalty for large repeated calls (outputs over 32 MB,
+  i.e. more than about 1.4 M 3-vectors or 1 M quaternions). Users who
+  cannot preallocate can raise `MALLOC_MMAP_THRESHOLD_`. That is an
+  environment-level setting, and the module should not set it.
+- <a id="c5"></a>**C5: Single-element operations are dominated by about 1.6 µs of PDL
+  call overhead.** That supports keeping a pure-Perl path for the
+  scalar API (single quaternion, single vector). The
+  [Pure-Perl baseline](#pure-perl-baseline) confirms this: pure Perl
+  is faster for one vector, and much faster when the vector starts out
+  as Perl data ([C16](#c16)–[C18](#c18)).
+- <a id="c6"></a>**C6: Autopthreading helps less than 2× on this machine,** because the
+  kernel is bandwidth-bound. No custom threading work is warranted.
 
 ## Column-layout input
 
@@ -381,15 +434,15 @@ things need measuring:
 
 ### Hypotheses
 
-- **H4: building `(3, N)` costs at least as much as the rotation.**
+- <a id="h4"></a>**H4: building `(3, N)` costs at least as much as the rotation.**
   Building means one full read and write of the data. That is the same
   memory traffic as `rotq` itself, so it should at least double the
   total time. The usual idioms (`cat`, `glue`) should cost more,
   because they create intermediate ndarrays.
-- **H5: a column kernel is about as fast as `rotq` on `(3, N)`.** It
+- <a id="h5"></a>**H5: a column kernel is about as fast as `rotq` on `(3, N)`.** It
   does the same arithmetic over the same 48 bytes per vector, just
   spread over six streams instead of two.
-- **H6: the stride inside a vector does not matter.** PP kernels read
+- <a id="h6"></a>**H6: the stride inside a vector does not matter.** PP kernels read
   through arbitrary strides, so `rotq` on a transposed view of an
   `(N, 3)` ndarray (`$v->xchg(0,1)`, stride $`N`$ between components)
   should be about as fast as on `(3, N)`. This would make a 2-D column
@@ -425,7 +478,7 @@ All variants agree exactly with each other (max $`\lvert \Delta\rvert = 0`$).
 
 I ran each configuration 3 times, alternating between default glibc
 malloc and `MALLOC_MMAP_THRESHOLD_` / `MALLOC_TRIM_THRESHOLD_` = 4 GiB
-(which removes the page-fault penalty described under H3). Each run
+(which removes the page-fault penalty described under [H3](#h3)). Each run
 used ≥ 0.5 s per cell. The tables give the **per-cell minimum over the
 3 runs**, in ns per vector. The machine was busy: load average 3–5,
 with the benchmark itself using up to 8 threads.
@@ -480,7 +533,7 @@ removed):
 
 ### Analysis
 
-**H4: building `(3, N)` is expensive (confirmed).**
+**[H4](#h4): building `(3, N)` is expensive (confirmed).**
 - Even the cheapest method, filling a preallocated ndarray through
   three slice assignments, costs 3–7 ns per vector for
   $`N \ge 10^4`$. That is about as much as the rotation, so
@@ -497,7 +550,7 @@ removed):
   the cheapest build-then-rotate path (161.9 ns) is 7× slower than
   `rotq3 prealloc` (23.6 ns).
 
-**H5: the column kernel matches `rotq` (confirmed).**
+**[H5](#h5): the column kernel matches `rotq` (confirmed).**
 - With preallocated outputs, `rotq3` is as fast as `rotq` on `(3, N)`
   at every $`N`$. At $`10^7`$ it is slightly faster: 3.7 against 4.6 ns
   with the threshold raised.
@@ -518,7 +571,7 @@ removed):
     but only because it reuses a preallocated output and so avoids the
     page faults.
 
-**H6: the stride inside a vector does not matter (confirmed).**
+**[H6](#h6): the stride inside a vector does not matter (confirmed).**
 - `rotq` on the transposed view of an `(N, 3)` ndarray runs within
   about 10% of `rotq` on `(3, N)` for $`N \ge 10^3`$.
 - The 12 ns extra at $`N = 100`$ is the fixed cost of creating the
@@ -536,37 +589,37 @@ removed):
 
 ### Conclusions for column-layout data
 
-1. **Offer an API that takes the three columns directly, backed by
-   column-signature PP kernels like `rotq3`.** It avoids a build step
-   that costs at least as much as the rotation itself, and 2–15× more
-   with the obvious `cat`/`glue` idioms. Example names:
-   `rotate_xyz($q, $x, $y, $z)`, returning `($x', $y', $z')`.
-   - It should also accept preallocated output columns.
-   - Its outputs are columns, so callers who want columns back pay
-     nothing on the way out either.
-2. **Keep the `(3, N)` kernels as well.** They are the natural form
-   for the rest of the API (vectors as one ndarray, broadcasting with
-   `(4, N)` quaternions).
-   - An `(N, 3)` ndarray can be passed as `$v->xchg(0,1)` at no extra
-     cost, so 2-D column stores are already handled and need only a
-     note in the documentation.
-   - The API should not guess the layout from the shape, because
-     $`N = 3`$ is ambiguous. Use separate entry points or an explicit
-     option.
-3. **If someone must build `(3, N)`, document the cheap options:**
-   - `cat(@c)->xchg(0,1)`, as a view passed straight to the kernel;
-   - slice-assigning into a preallocated ndarray.
+- <a id="c7"></a>**C7: Offer an API that takes the three columns directly, backed by
+  column-signature PP kernels like `rotq3`.** It avoids a build step
+  that costs at least as much as the rotation itself, and 2–15× more
+  with the obvious `cat`/`glue` idioms. Example names:
+  `rotate_xyz($q, $x, $y, $z)`, returning `($x', $y', $z')`.
+  - It should also accept preallocated output columns.
+  - Its outputs are columns, so callers who want columns back pay
+    nothing on the way out either.
+- <a id="c8"></a>**C8: Keep the `(3, N)` kernels as well.** They are the natural form
+  for the rest of the API (vectors as one ndarray, broadcasting with
+  `(4, N)` quaternions).
+  - An `(N, 3)` ndarray can be passed as `$v->xchg(0,1)` at no extra
+    cost, so 2-D column stores are already handled and need only a
+    note in the documentation.
+  - The API should not guess the layout from the shape, because
+    $`N = 3`$ is ambiguous. Use separate entry points or an explicit
+    option.
+- <a id="c9"></a>**C9: If someone must build `(3, N)`, document the cheap options:**
+  - `cat(@c)->xchg(0,1)`, as a view passed straight to the kernel;
+  - slice-assigning into a preallocated ndarray.
 
-   Avoid `->copy` on a transposed view. It was the slowest method
-   measured.
-4. **A column kernel triples the per-call ndarray overhead for outputs
-   it allocates itself.** At small $`N`$ that is about 2 µs more per
-   call than `rotq`. This only matters for many small calls, and
-   passing preallocated outputs avoids it.
-5. **Writing a column kernel costs little.** It is the same `Code`
-   block with `$a()`/`$b()`/`$c()` in place of `$v(m=>0..2)`. If many
-   operations need both forms, they could be generated from one
-   template in the `.pd` file.
+  Avoid `->copy` on a transposed view. It was the slowest method
+  measured.
+- <a id="c10"></a>**C10: A column kernel triples the per-call ndarray overhead for outputs
+  it allocates itself.** At small $`N`$ that is about 2 µs more per
+  call than `rotq`. This only matters for many small calls, and
+  passing preallocated outputs ([C4](#c4)) avoids it.
+- <a id="c11"></a>**C11: Writing a column kernel costs little.** It is the same `Code`
+  block with `$a()`/`$b()`/`$c()` in place of `$v(m=>0..2)`. If many
+  operations need both forms, they could be generated from one
+  template in the `.pd` file.
 
 ## Allocating outputs without zero-filling
 
@@ -575,7 +628,7 @@ removed):
 `zeroes` writes zeros over the whole new ndarray. That write is wasted
 when a PP kernel is about to overwrite every element.
 
-- **H7:** `PDL->new_from_specification(double, @dims)` allocates
+- <a id="h7"></a>**H7:** `PDL->new_from_specification(double, @dims)` allocates
   without filling. It should therefore save one pass over the output
   and be faster than `zeroes`, both on its own and as a freshly
   allocated output passed to `rotq`/`rotq3`.
@@ -637,7 +690,7 @@ malloc:
 
 ### Analysis
 
-**H7 is rejected for PDL 2.106: `new_from_specification` +
+**[H7](#h7) is rejected for PDL 2.106: `new_from_specification` +
 `make_physical` costs exactly as much as `zeroes`.**
 - Both cost the same at every $`N`$, with or without the mmap
   threshold.
@@ -773,29 +826,212 @@ outputs. By $`N = 10^5`$ they are lost in the noise. The saving from
 caller allocation only appears when **one output is reused across
 calls**, so that the construction and the `memset` are paid once.
 
-### Conclusions
+### Conclusions for output allocation
 
-1. **Replacing `zeroes` with `new_from_specification` gains nothing in
-   PDL 2.106.** `zeroes` is `new_from_specification` plus an immediate
-   `make_physical`. The clearing pass is the unconditional `memset` in
-   `pdl_allocdata`, and every path that allocates data goes through
-   it. Inside `CXC::Math::Quaternion`, use whichever reads better.
-2. **The only way to avoid that pass today is to reuse an output
-   ndarray across calls.** That is the "preallocated `[o]` argument"
-   recommendation from earlier, and it removes the page faults too. It
-   is worth about 25–40% at large $`N`$ without page faults, and 4–5×
-   with them.
-3. **Skipping the zero fill would need a change in PDL itself,** at
-   [pdlapi.c:204](https://github.com/PDLPorters/pdl/blob/2.106/lib/PDL/Core/pdlapi.c#L204).
-   For example, a state flag could let `pdl_allocdata` skip the
-   `memset` for output ndarrays that a PP kernel fully overwrites (that
-   is, a non-`[t]`, non-in-place `[o]`). That would be an upstream
-   request. Based on the measurements here, it would save about 1.1–1.5
-   ns per vector, roughly 25–40% of `rotq`, for fresh outputs at large
-   $`N`$ without page faults. With default malloc and outputs over
-   32 MB, the page faults would move from the `memset` to the kernel's
-   first write. They would not go away, so the 4–5× penalty would
-   mostly remain.
+- <a id="c12"></a>**C12: Replacing `zeroes` with `new_from_specification` gains nothing in
+  PDL 2.106.** `zeroes` is `new_from_specification` plus an immediate
+  `make_physical`. The clearing pass is the unconditional `memset` in
+  `pdl_allocdata`, and every path that allocates data goes through
+  it. Inside `CXC::Math::Quaternion`, use whichever reads better.
+- <a id="c13"></a>**C13: The only way to avoid that pass today is to reuse an output
+  ndarray across calls.** That is [C4](#c4) (accept a preallocated `[o]`
+  output), which also removes the page faults. It
+  is worth about 25–40% at large $`N`$ without page faults, and 4–5×
+  with them.
+- <a id="c14"></a>**C14: Skipping the zero fill would need a change in PDL itself,** at
+  [pdlapi.c:204](https://github.com/PDLPorters/pdl/blob/2.106/lib/PDL/Core/pdlapi.c#L204).
+  For example, a state flag could let `pdl_allocdata` skip the
+  `memset` for output ndarrays that a PP kernel fully overwrites (that
+  is, a non-`[t]`, non-in-place `[o]`). That would be an upstream
+  request. Based on the measurements here, it would save about 1.1–1.5
+  ns per vector, roughly 25–40% of `rotq`, for fresh outputs at large
+  $`N`$ without page faults. With default malloc and outputs over
+  32 MB, the page faults would move from the `memset` to the kernel's
+  first write. They would not go away, so the 4–5× penalty would
+  mostly remain.
+
+## Pure-Perl baseline
+
+### Question
+
+`CXC::Math::Quaternion` will have a pure-Perl implementation, for use
+when PDL is not installed. That raises three questions:
+
+1. How fast is pure Perl, and in what form should it be written?
+2. At what $`N`$ does PDL start to win?
+3. When the caller's data is in Perl arrays, is it worth converting it
+   to ndarrays, running the PP kernel and converting back?
+
+### Hypotheses
+
+- <a id="h8"></a>**H8: pure Perl wins for one vector and loses badly at large
+  $`N`$.** A PDL call has about 1.1–1.6 µs of fixed overhead. A
+  pure-Perl rotation is a few dozen interpreted operations, so it
+  should be comparable for one vector and 100× or more slower per
+  vector at large $`N`$.
+- <a id="h9"></a>**H9: in pure Perl, the matrix form beats the quaternion form once
+  there are a few vectors.** The interpreter's cost is per operation,
+  not per byte. The matrix form needs 9 multiplies and 6 adds per
+  vector. The quaternion form needs about 18 multiplies and 12 adds,
+  plus temporaries. Building the matrix (about 30 operations) is paid
+  once per call. This is the opposite of the PP result in [H2](#h2), where
+  memory traffic dominated.
+- <a id="h10"></a>**H10: converting Perl data to ndarrays and back costs about as much
+  as rotating it in Perl.** Both walk every element in the
+  interpreter, so going through PDL should gain little or nothing for
+  Perl data.
+
+### Benchmark ([pureperl.pl](pureperl.pl))
+
+The quaternion is a Perl list `(x, y, z, w)`. The Perl vector data is
+either an array of `[x,y,z]` refs, as produced by `unpdl`, or three
+column arrays.
+
+| Label       | Implementation |
+|-------------|----------------|
+| `rot1 map`  | `map { rot1(\@q, $_) } @aoa`: one sub call per vector, as a scalar API would be used. Returns a new `[x,y,z]`. |
+| `aoa`       | One call, loop inlined, quaternion form. Array of `[x,y,z]` in and out. |
+| `aoa mat`   | As `aoa`, but builds the 3×3 matrix once and uses it in the loop. |
+| `cols`      | Three column arrays in and out, quaternion form. |
+| `cols mat`  | Three column arrays, matrix form. |
+| `rotq`, `rotq3` | The PP kernels, with data already in ndarrays (as in earlier sections). |
+| `AoA->rotq` | Round trip: `unpdl(rotq($q, pdl($aoa)))`. |
+| `cols->rotq3` | Round trip: `pdl()` each column, `rotq3`, then `[ ->list ]` each result. |
+| `pdl(AoA)`, `unpdl`, `pdl(cols)`, `cols list` | The conversions alone. |
+
+- All pure-Perl forms agree with `rotq` to ≤ 2.2e-16.
+- Same protocol as before: ≥ 0.5 s per cell, 3 runs, per-cell minimum.
+  - Raw output: `results/pureperl-{1,2,3}.txt`.
+  - Minima: [results/pureperl-min.txt](results/pureperl-min.txt).
+- The machine's load average was about 1.3 during these runs.
+
+### Results
+
+All figures are ns per vector.
+
+**(1) Pure Perl:**
+
+|     N | rot1 map |  aoa | aoa mat | cols | cols mat |
+|------:|---------:|-----:|--------:|-----:|---------:|
+|     1 |     1404 | 1371 |    2203 | 1737 |     2420 |
+|     3 |     1119 |  948 |    1114 | 1199 |     1132 |
+|    10 |     1071 |  807 |     658 |  924 |      736 |
+|    30 |     1061 |  774 |     545 |  863 |      634 |
+|  1e2  |     1135 |  803 |     520 |  815 |      512 |
+|  1e3  |     1074 |  744 |     506 |  762 |      486 |
+|  1e4  |     1077 |  746 |     499 |  748 |      469 |
+|  1e5  |     1095 |  770 |     525 |  860 |      624 |
+|  1e6  |     1119 |  819 |     569 |  798 |      691 |
+
+**(2) PDL with data already in ndarrays, and the round trip from Perl
+data:**
+
+|     N | rotq | rotq3 | AoA->rotq | cols->rotq3 |
+|------:|-----:|------:|----------:|------------:|
+|     1 | 1789 |  3472 |      7873 |       16689 |
+|     3 |  613 |  1129 |      3489 |        5495 |
+|    10 |  199 |   386 |      2011 |        2060 |
+|    30 |   69 |   136 |      1564 |         908 |
+|  1e2  |   25 |    45 |      1427 |         510 |
+|  1e3  |    8 |    10 |      1383 |         346 |
+|  1e4  |    6 |     7 |      1483 |         350 |
+|  1e5  |    6 |     6 |      1721 |         620 |
+|  1e6  |    5 |     8 |      1881 |        1106 |
+
+**(3) The conversions alone:**
+
+|     N | pdl(AoA) | unpdl | pdl(cols) | cols list |
+|------:|---------:|------:|----------:|----------:|
+|     1 |     4665 |   561 |      8724 |      2671 |
+|     3 |     2386 |   306 |      3079 |      1009 |
+|    10 |     1530 |   222 |      1030 |       455 |
+|    30 |     1213 |   197 |       446 |       293 |
+|  1e2  |     1131 |   190 |       218 |       231 |
+|  1e3  |     1127 |   228 |       123 |       207 |
+|  1e4  |     1176 |   248 |       116 |       233 |
+|  1e5  |     1268 |   422 |       113 |       443 |
+|  1e6  |     1431 |   589 |       121 |      1016 |
+
+### Analysis
+
+**[H8](#h8): PDL wins from 3 vectors up, if the data is already in ndarrays
+(confirmed).**
+- For one vector, pure Perl is a little faster: 1371–1404 ns against
+  1789 ns for `rotq`.
+- At $`N = 3`$, PDL is already faster: 613 against 948 ns per vector.
+  So the crossover is at about 2 vectors.
+- From there PDL's lead grows as its fixed cost is spread over more
+  vectors. It is 20× at $`N = 100`$ against the fastest pure-Perl form, and
+  60–160× for $`N \ge 10^3`$ (5–8 ns against 470–820 ns).
+- Pure Perl's cost per vector is flat, at about 0.5–0.8 µs inlined and
+  about 1.1 µs with a sub call per vector. It rises slightly at
+  $`10^5`$–$`10^6`$, presumably from allocating millions of Perl
+  scalars and arrays.
+
+**[H9](#h9): in pure Perl, the matrix form wins from about 10 vectors
+(confirmed).**
+- The matrix form is about 1.5× faster per vector than the quaternion
+  form: 499–569 against 744–819 ns for arrays of `[x,y,z]`, and similar
+  for columns.
+- Building the matrix costs about 0.8 µs once per call. That makes the
+  matrix form slower at $`N = 1`$ (2203 against 1371 ns), about even at
+  $`N = 3`$, and faster from $`N = 10`$ on.
+- This is the reverse of the PP result ([H2](#h2)). In the interpreter, the
+  number of operations is what counts. In C, memory traffic dominates
+  and both forms are about equally cheap.
+- A sub call per vector (`rot1 map`) adds about 300 ns per vector
+  (1071–1135 against 744–819 ns) for argument unpacking and the call
+  itself. A bulk API should loop inside one call.
+- Whether the data is an array of `[x,y,z]` or three column arrays
+  makes little difference in pure Perl.
+
+**[H10](#h10): converting Perl data for PDL is not worth it (confirmed, and
+worse than expected for arrays of `[x,y,z]`).**
+- **Arrays of `[x,y,z]`:** the round trip is slower than pure Perl at
+  *every* $`N`$: 1.4–1.9 µs per vector, against 0.5–0.8 µs in Perl.
+  - `pdl($aoa)` alone costs 1.1–1.4 µs per vector, more than the whole
+    pure-Perl rotation. That is about 400 ns per element, from walking
+    the nested Perl structure generically.
+  - `unpdl` back costs another 0.2–0.6 µs.
+- **Column arrays:** these convert about 10× faster. `pdl(\@x)` costs
+  about 40 ns per element. Even so:
+  - The round trip ties the best pure-Perl form (`cols mat`) at
+    $`N = 100`$ and $`10^5`$. It only beats it at $`10^3`$–$`10^4`$, by
+    1.3–1.4× (346 against 486 ns at $`10^3`$).
+  - It loses at $`10^6`$ (1106 against 691 ns), where turning the
+    results back into Perl lists (`->list`) costs about 1 µs per
+    vector.
+- **For one vector,** the round trip costs 7.9 µs, against 1.4 µs in
+  pure Perl.
+
+In every case, converting the data costs more than the PP rotation
+itself: about 3× at $`N = 1`$, and over 100× at $`10^6`$. PDL's speed is only
+available to callers whose data is *already* in ndarrays.
+
+### Conclusions for the pure-Perl implementation
+
+- <a id="c15"></a>**C15: Write the pure-Perl bulk rotation with the matrix form.** Build
+  the 3×3 matrix once per call, then do 9 multiplies and 6 adds per
+  vector inside a single loop. It is about 1.5× faster than the
+  quaternion form for $`N \ge 10`$. This is the reverse of [C2](#c2), which applies
+  to the PP kernels.
+- <a id="c16"></a>**C16: Use the quaternion form directly for a single vector.** It avoids
+  about 0.8 µs of matrix construction.
+- <a id="c17"></a>**C17: Choose the implementation by the type of the input, not by
+  whether PDL is installed.**
+  - Perl arrays in, Perl arrays out: always use the pure-Perl code.
+    Converting to ndarrays and back is slower for arrays of `[x,y,z]`,
+    and at best 1.4× faster for columns.
+  - ndarrays in: use the PP kernels.
+  - Do not quietly "upgrade" Perl data to PDL inside the module.
+- <a id="c18"></a>**C18: The scalar API (one quaternion, one vector as Perl values) should
+  be pure Perl even when PDL is available.** That costs about 1.4 µs,
+  against about 1.8 µs with data already in ndarrays, and 7.9 µs if
+  the values have to be converted to ndarrays first.
+- <a id="c19"></a>**C19: Tell users who want PDL speed to keep their data in ndarrays.**
+  Pure Perl is about 100× slower than the PP kernels at large $`N`$.
+  If users must convert, three column arrays (`pdl(\@x)`) convert
+  about 10× faster than an array of `[x,y,z]` refs (`pdl(\@aoa)`).
 
 ## Caveats and open questions
 
@@ -808,8 +1044,12 @@ calls**, so that the construction and the `memset` are paid once.
 - The column-layout runs used only the one-quaternion case. Quaternions
   supplied as four columns, `(N)` each, were not measured. They would
   need a `q0(); q1(); q2(); q3()` signature variant.
-- No pure-Perl baseline was measured, so the scalar-path decision in
-  conclusion 5 is still open.
+- The pure-Perl baseline used only the one-quaternion case, and only
+  arrays of `[x,y,z]` and three column arrays as Perl data.
+  - A flat Perl array `(x0,y0,z0,x1,…)` was not measured.
+  - Faster ways to build an ndarray from Perl data, such as `pack 'd*'`
+    into the data of a `new_from_specification` ndarray, were not
+    measured.
 - Quaternion–quaternion products, normalisation and the
   RA/Dec/Roll ↔ quaternion conversions were not benchmarked. They are
   expected to behave like `rotq`: one pass, no temporaries.

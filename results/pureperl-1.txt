@@ -1,0 +1,39 @@
+max |diff| vs rotq: rot1 0.0e+00  aoa 0.0e+00  aoa_mat 2.2e-16  cols 0.0e+00  cols_mat 2.2e-16
+perl 5.42.3, PDL 2.106
+
+(1) pure Perl: ns per vector
+        N  rot1 map       aoa   aoa mat      cols  cols mat
+    1e+00      1455      1455      2203      2057      2763
+    3e+00      1285      1002      1153      1257      1268
+    1e+01      1205       869       740      1038       814
+    3e+01      1138       799       585       912       634
+    1e+02      1138       803       543       815       512
+    1e+03      1074       744       506       762       486
+    1e+04      1077       746       499       748       469
+    1e+05      1095       770       525       860       626
+    1e+06      1237       864       593       877       691
+
+(2) PDL, data already in ndarrays vs. round trip from/to Perl arrays: ns per vector
+        N      rotq     rotq3 |   AoA->rotq cols->rotq3
+               -- PDL data -- | -- Perl data, round trip --
+    1e+00      1789      3472 |        8100       16689
+    3e+00       613      1129 |        3524        5495
+    1e+01       199       388 |        2011        2105
+    3e+01        69       136 |        1668         908
+    1e+02        25        47 |        1427         515
+    1e+03         8        11 |        1426         361
+    1e+04         6         7 |        1571         364
+    1e+05         6         6 |        1770         635
+    1e+06         5         8 |        2035        1147
+
+(3) converting between Perl arrays and ndarrays: ns per vector
+        N    pdl(AoA)       unpdl |   pdl(cols)   cols list
+    1e+00        5485         596 |       10487        3100
+    3e+00        2782         318 |        3626        1026
+    1e+01        1565         222 |        1180         479
+    3e+01        1344         204 |         457         303
+    1e+02        1191         196 |         239         251
+    1e+03        1153         238 |         135         222
+    1e+04        1270         248 |         116         243
+    1e+05        1312         438 |         124         494
+    1e+06        1431         621 |         121        1098

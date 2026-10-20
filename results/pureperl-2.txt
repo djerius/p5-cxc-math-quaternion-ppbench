@@ -1,0 +1,39 @@
+max |diff| vs rotq: rot1 0.0e+00  aoa 0.0e+00  aoa_mat 2.2e-16  cols 0.0e+00  cols_mat 2.2e-16
+perl 5.42.3, PDL 2.106
+
+(1) pure Perl: ns per vector
+        N  rot1 map       aoa   aoa mat      cols  cols mat
+    1e+00      1404      1433      2444      1737      2420
+    3e+00      1119       948      1293      1842      1132
+    1e+01      1071       807       658       924       736
+    3e+01      1061       774       545       900       706
+    1e+02      1196       871       612       932       575
+    1e+03      1141       808       542       818       497
+    1e+04      1125       808       548       800       519
+    1e+05      1133       786       531       917       636
+    1e+06      1119       819       569       798       699
+
+(2) PDL, data already in ndarrays vs. round trip from/to Perl arrays: ns per vector
+        N      rotq     rotq3 |   AoA->rotq cols->rotq3
+               -- PDL data -- | -- Perl data, round trip --
+    1e+00      1872      3641 |        7873       17713
+    3e+00       657      1214 |        3489        5725
+    1e+01       205       386 |        2097        2060
+    3e+01        72       144 |        1564         956
+    1e+02        26        52 |        1509         546
+    1e+03         8        10 |        1418         395
+    1e+04         6         7 |        1483         350
+    1e+05         6         6 |        1722         759
+    1e+06         5         8 |        2040        1156
+
+(3) converting between Perl arrays and ndarrays: ns per vector
+        N    pdl(AoA)       unpdl |   pdl(cols)   cols list
+    1e+00        4938         561 |        9563        2919
+    3e+00        2532         317 |        3267        1115
+    1e+01        1764         259 |        1147         483
+    3e+01        1239         214 |         446         310
+    1e+02        1217         204 |         229         251
+    1e+03        1166         246 |         123         226
+    1e+04        1442         315 |         119         250
+    1e+05        1391         539 |         119         719
+    1e+06        1474         589 |         135        1072

@@ -1,0 +1,39 @@
+max |diff| vs rotq: rot1 0.0e+00  aoa 0.0e+00  aoa_mat 2.2e-16  cols 0.0e+00  cols_mat 2.2e-16
+perl 5.42.3, PDL 2.106
+
+(1) pure Perl: ns per vector
+        N  rot1 map       aoa   aoa mat      cols  cols mat
+    1e+00      1434      1371      2269      1903      3118
+    3e+00      1297      1123      1114      1199      1268
+    1e+01      1171       887       715       991       768
+    3e+01      1084       826       574       863       654
+    1e+02      1135       815       520       830       550
+    1e+03      1154       828       539       776       502
+    1e+04      1149       805       507       749       512
+    1e+05      1203       818       538       933       624
+    1e+06      1278       883       587       837       721
+
+(2) PDL, data already in ndarrays vs. round trip from/to Perl arrays: ns per vector
+        N      rotq     rotq3 |   AoA->rotq cols->rotq3
+               -- PDL data -- | -- Perl data, round trip --
+    1e+00      1892      3693 |        8209       16894
+    3e+00       658      1252 |        3842        5893
+    1e+01       210       415 |        2172        2121
+    3e+01        72       144 |        1658         999
+    1e+02        25        45 |        1448         510
+    1e+03         8        10 |        1383         346
+    1e+04         6         7 |        1569         353
+    1e+05         6         6 |        1721         620
+    1e+06         5         8 |        1881        1106
+
+(3) converting between Perl arrays and ndarrays: ns per vector
+        N    pdl(AoA)       unpdl |   pdl(cols)   cols list
+    1e+00        4665         562 |        8724        2671
+    3e+00        2386         306 |        3079        1009
+    1e+01        1530         227 |        1030         455
+    3e+01        1213         197 |         477         293
+    1e+02        1131         190 |         218         231
+    1e+03        1127         228 |         123         207
+    1e+04        1176         258 |         117         233
+    1e+05        1268         422 |         113         443
+    1e+06        1450         595 |         124        1016

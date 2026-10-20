@@ -1,0 +1,30 @@
+max |diff| vs new-array versions: xs_rot1_into 0.0e+00  rot1_into 0.0e+00  xs_rot_aoa_into 0.0e+00  rot_aoa_mat_into 0.0e+00  xs_rot_cols_into 0.0e+00  rot_cols_mat_into 0.0e+00  in place 0.0e+00
+perl 5.42.3, PDL 2.106
+
+(1) one vector per call: ns per call
+  empty loop (baseline)                          16
+  Perl  rot1(\@q, \@v)          -> new         1108
+  Perl  rot1_into(\@q, \@v, \@r)  -> into      1122
+  XS    xs_rot1(\@q, \@v)       -> new          292
+  XS    xs_rot1_into(\@q,\@v,\@r) -> into       198
+  XS    xs_rot1_list(@q, @v)    -> list         194
+
+(2) array of [x,y,z]: ns per vector
+        N  Perl new Perl into |    XS new   XS into XS inplace
+    1e+00      2328      2358 |       493       361       317
+    1e+01       735       684 |       183        91        89
+    1e+02       552       515 |       150        69        66
+    1e+03       560       522 |       174        68        67
+    1e+04       588       515 |       188        75        67
+    1e+05       595       527 |       217       102        74
+    1e+06       566       484 |       214        81        64
+
+(3) three column arrays: ns per vector
+        N  Perl new Perl into |    XS new   XS into XS inplace | PDL prealloc
+    1e+00      2469      2241 |       582       326       320 |       1598.0
+    1e+01       771       619 |       115        72        71 |        172.0
+    1e+02       582       452 |        65        45        44 |         21.8
+    1e+03       490       429 |        64        48        46 |          8.0
+    1e+04       490       450 |        78        58        42 |          5.9
+    1e+05       628       676 |       286       272        46 |          5.9
+    1e+06       566       540 |       253       260        45 |          6.7

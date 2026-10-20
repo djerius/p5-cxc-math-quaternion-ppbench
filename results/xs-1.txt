@@ -1,0 +1,31 @@
+max |diff|: xs_rot1 0.0e+00  xs_rot1_list 0.0e+00  xs_rot_aoa 0.0e+00  xs_rot_cols 0.0e+00  rotq_shared 0.0e+00
+perl 5.42.3, PDL 2.106
+
+(1) one vector per call: ns per call
+  empty loop (baseline)                        14
+  Perl  rot1(\@q, \@v)      -> [..]           979
+  XS    xs_rot1(\@q, \@v)   -> [..]           288
+  Perl  rot1_list(@q, @v)   -> list           877
+  XS    xs_rot1_list(@q, @v) -> list          178
+  PDL   rotq($q, $v)  (ndarrays)             1487
+  PDL   rotq($q, $v, $r) (prealloc)           948
+
+(2) N vectors per call: ns per vector
+        N  Perl aoa  Perl mat    XS aoa | Perl cols  Perl mat   XS cols |  PDL rotq
+               --- array of [x,y,z] --- |   --- three column arrays --- |  ndarrays
+    1e+00      1431      2277       485 |      1818      2560       642 |    2251.1
+    3e+00      1286      2082       475 |      2368      2424       451 |    1250.8
+    1e+01      1742      1386       300 |      1157       815       155 |     215.4
+    3e+01       947       818       172 |       956       677        84 |      70.1
+    1e+02       877       552       155 |       833       577        75 |      25.8
+    1e+03       814       568       168 |       773       488        73 |       8.8
+    1e+04       903       599       205 |       926       557        87 |       6.9
+    1e+05       909       616       221 |      1000       744       251 |       7.3
+    1e+06       951       586       241 |       914      1280       551 |       7.7
+
+(3) PP kernels: hand-written rotq vs. rotq_shared (qrot.h): ns per vector
+        N      rotq rotq_shared rotq prealloc shared prealloc
+    1e+02      31.0        28.6         18.7           20.1
+    1e+04       6.5         6.5          6.0            5.7
+    1e+06       5.7         6.2          4.5            4.9
+    1e+07      27.5        27.8          4.9            5.7

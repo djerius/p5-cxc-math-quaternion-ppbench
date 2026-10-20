@@ -1,4 +1,71 @@
 pp_bless('QBench');
+# shared C rotation code (qrot.h) and helpers for the plain-XS functions below;
+# pp_addhdr text goes into QBench.xs and every pp-*.c file
+pp_addhdr(<<'EOH');
+#include "qrot.h"
+
+/* the array behind an array ref */
+static inline AV *
+qb_av(pTHX_ SV *ref, const char *what)
+{
+    if (!SvROK(ref) || SvTYPE(SvRV(ref)) != SVt_PVAV)
+        croak("%s must be an array reference", what);
+    return (AV *)SvRV(ref);
+}
+
+/* copy the first n numbers of an array ref */
+static inline void
+qb_get(pTHX_ SV *ref, double *d, int n, const char *what)
+{
+    AV *av = qb_av(aTHX_ ref, what);
+    int i;
+    if (av_count(av) < (Size_t)n)
+        croak("%s must have %d elements", what, n);
+    for (i = 0; i < n; i++) {
+        SV **e = av_fetch(av, i, 0);
+        d[i] = e ? SvNV(*e) : 0;
+    }
+}
+
+/* a new [x, y, z] array ref */
+static inline SV *
+qb_vec3(pTHX_ const double *r)
+{
+    AV *av = newAV();
+    av_extend(av, 2);
+    av_store(av, 0, newSVnv(r[0]));
+    av_store(av, 1, newSVnv(r[1]));
+    av_store(av, 2, newSVnv(r[2]));
+    return newRV_noinc((SV *)av);
+}
+/* store into element i of av, reusing the existing scalar if there is one */
+static inline void
+qb_set(pTHX_ AV *av, SSize_t i, double val)
+{
+    SV **e = av_fetch(av, i, 1);
+    if (!e) croak("cannot store element %ld", (long)i);
+    sv_setnv(*e, val);
+    SvSETMAGIC(*e);
+}
+
+/* the [x, y, z] array in element i of av, created if it is not an array ref */
+static inline AV *
+qb_vec3_slot(pTHX_ AV *av, SSize_t i)
+{
+    AV *v;
+    SV **e = av_fetch(av, i, 1);
+    if (!e) croak("cannot store element %ld", (long)i);
+    if (SvROK(*e) && SvTYPE(SvRV(*e)) == SVt_PVAV)
+        v = (AV *)SvRV(*e);
+    else {
+        v = newAV();
+        sv_setsv(*e, sv_2mortal(newRV_noinc((SV *)v)));
+    }
+    av_extend(v, 2);    /* room for [x, y, z]; nothing to do if it is already there */
+    return v;
+}
+EOH
+
 # scalar-last quaternion q = (x,y,z,w); v' = q v q*  (Hamilton)
 # v' = v + 2w(u x v) + 2 u x (u x v), u = (x,y,z)
 pp_def('rotq',
@@ -30,4 +97,198 @@ pp_def('rotq3',
     $rb() = b + w*ty + (z*tx - x*tz);
     $rc() = c + w*tz + (x*ty - y*tx);
   });
+# the same rotation through the shared C implementation in qrot.h
+pp_def('rotq_shared',
+  Pars => 'q(n=4); v(m=3); [o] r(m=3);',
+  GenericTypes => ['D'],
+  Code => q{
+    double qa[4] = { $q(n=>0), $q(n=>1), $q(n=>2), $q(n=>3) };
+    double va[3] = { $v(m=>0), $v(m=>1), $v(m=>2) };
+    double ra[3];
+    qrot_vec(qa, va, ra);
+    $r(m=>0) = ra[0]; $r(m=>1) = ra[1]; $r(m=>2) = ra[2];
+  });
+
+# Plain XS on Perl data, through the same qrot_vec as rotq_shared.
+# q is always an array ref [x, y, z, w].
+pp_add_exported('', 'xs_rot1 xs_rot1_list xs_rot_aoa xs_rot_cols');
+pp_add_exported('', 'xs_rot1_into xs_rot_aoa_into xs_rot_cols_into');
+pp_addxs(<<'EOXS');
+SV *
+xs_rot1(q, v)
+    SV *q
+    SV *v
+  CODE:
+    double qa[4], va[3], ra[3];
+    qb_get(aTHX_ q, qa, 4, "q");
+    qb_get(aTHX_ v, va, 3, "v");
+    qrot_vec(qa, va, ra);
+    RETVAL = qb_vec3(aTHX_ ra);
+  OUTPUT:
+    RETVAL
+
+void
+xs_rot1_list(x, y, z, w, vx, vy, vz)
+    double x
+    double y
+    double z
+    double w
+    double vx
+    double vy
+    double vz
+  PPCODE:
+    double qa[4] = { x, y, z, w }, va[3] = { vx, vy, vz }, ra[3];
+    qrot_vec(qa, va, ra);
+    EXTEND(SP, 3);
+    mPUSHn(ra[0]);
+    mPUSHn(ra[1]);
+    mPUSHn(ra[2]);
+
+SV *
+xs_rot_aoa(q, vs)
+    SV *q
+    SV *vs
+  CODE:
+    double qa[4];
+    AV *in, *out;
+    SSize_t i, n;
+    qb_get(aTHX_ q, qa, 4, "q");
+    in = qb_av(aTHX_ vs, "vectors");
+    n = av_count(in);
+    out = newAV();
+    if (n) av_extend(out, n - 1);
+    for (i = 0; i < n; i++) {
+        double va[3], ra[3];
+        SV **e = av_fetch(in, i, 0);
+        if (!e) croak("vector %ld is undefined", (long)i);
+        qb_get(aTHX_ *e, va, 3, "vector");
+        qrot_vec(qa, va, ra);
+        av_store(out, i, qb_vec3(aTHX_ ra));
+    }
+    RETVAL = newRV_noinc((SV *)out);
+  OUTPUT:
+    RETVAL
+
+void
+xs_rot_cols(q, cx, cy, cz)
+    SV *q
+    SV *cx
+    SV *cy
+    SV *cz
+  PPCODE:
+    double qa[4];
+    AV *ax, *ay, *az, *ox, *oy, *oz;
+    SSize_t i, n;
+    qb_get(aTHX_ q, qa, 4, "q");
+    ax = qb_av(aTHX_ cx, "x");
+    ay = qb_av(aTHX_ cy, "y");
+    az = qb_av(aTHX_ cz, "z");
+    n = av_count(ax);
+    if (av_count(ay) != (Size_t)n || av_count(az) != (Size_t)n)
+        croak("x, y and z must have the same length");
+    ox = newAV(); oy = newAV(); oz = newAV();
+    if (n) { av_extend(ox, n - 1); av_extend(oy, n - 1); av_extend(oz, n - 1); }
+    for (i = 0; i < n; i++) {
+        SV **ex = av_fetch(ax, i, 0), **ey = av_fetch(ay, i, 0), **ez = av_fetch(az, i, 0);
+        double va[3], ra[3];
+        va[0] = ex ? SvNV(*ex) : 0;
+        va[1] = ey ? SvNV(*ey) : 0;
+        va[2] = ez ? SvNV(*ez) : 0;
+        qrot_vec(qa, va, ra);
+        av_store(ox, i, newSVnv(ra[0]));
+        av_store(oy, i, newSVnv(ra[1]));
+        av_store(oz, i, newSVnv(ra[2]));
+    }
+    EXTEND(SP, 3);
+    mPUSHs(newRV_noinc((SV *)ox));
+    mPUSHs(newRV_noinc((SV *)oy));
+    mPUSHs(newRV_noinc((SV *)oz));
+
+# The _into variants write into arrays the caller supplies, reusing the
+# scalars (and, for xs_rot_aoa_into, the inner [x, y, z] arrays) already
+# there; missing ones are created, so the first call into an empty array
+# allocates and later calls reuse.  An output may be the input itself
+# (in place): each vector is read before it is written.
+
+void
+xs_rot1_into(q, v, r)
+    SV *q
+    SV *v
+    SV *r
+  CODE:
+    double qa[4], va[3], ra[3];
+    AV *out;
+    qb_get(aTHX_ q, qa, 4, "q");
+    qb_get(aTHX_ v, va, 3, "v");
+    out = qb_av(aTHX_ r, "r");
+    av_extend(out, 2);
+    qrot_vec(qa, va, ra);
+    qb_set(aTHX_ out, 0, ra[0]);
+    qb_set(aTHX_ out, 1, ra[1]);
+    qb_set(aTHX_ out, 2, ra[2]);
+
+void
+xs_rot_aoa_into(q, vs, rs)
+    SV *q
+    SV *vs
+    SV *rs
+  CODE:
+    double qa[4];
+    AV *in, *out;
+    SSize_t i, n;
+    qb_get(aTHX_ q, qa, 4, "q");
+    in = qb_av(aTHX_ vs, "vectors");
+    out = qb_av(aTHX_ rs, "output");
+    n = av_count(in);
+    if (n) av_extend(out, n - 1);
+    for (i = 0; i < n; i++) {
+        double va[3], ra[3];
+        AV *rv;
+        SV **e = av_fetch(in, i, 0);
+        if (!e) croak("vector %ld is undefined", (long)i);
+        qb_get(aTHX_ *e, va, 3, "vector");
+        qrot_vec(qa, va, ra);
+        rv = qb_vec3_slot(aTHX_ out, i);
+        qb_set(aTHX_ rv, 0, ra[0]);
+        qb_set(aTHX_ rv, 1, ra[1]);
+        qb_set(aTHX_ rv, 2, ra[2]);
+    }
+
+void
+xs_rot_cols_into(q, cx, cy, cz, rx, ry, rz)
+    SV *q
+    SV *cx
+    SV *cy
+    SV *cz
+    SV *rx
+    SV *ry
+    SV *rz
+  CODE:
+    double qa[4];
+    AV *ax, *ay, *az, *ox, *oy, *oz;
+    SSize_t i, n;
+    qb_get(aTHX_ q, qa, 4, "q");
+    ax = qb_av(aTHX_ cx, "x");
+    ay = qb_av(aTHX_ cy, "y");
+    az = qb_av(aTHX_ cz, "z");
+    ox = qb_av(aTHX_ rx, "output x");
+    oy = qb_av(aTHX_ ry, "output y");
+    oz = qb_av(aTHX_ rz, "output z");
+    n = av_count(ax);
+    if (av_count(ay) != (Size_t)n || av_count(az) != (Size_t)n)
+        croak("x, y and z must have the same length");
+    if (n) { av_extend(ox, n - 1); av_extend(oy, n - 1); av_extend(oz, n - 1); }
+    for (i = 0; i < n; i++) {
+        SV **ex = av_fetch(ax, i, 0), **ey = av_fetch(ay, i, 0), **ez = av_fetch(az, i, 0);
+        double va[3], ra[3];
+        va[0] = ex ? SvNV(*ex) : 0;
+        va[1] = ey ? SvNV(*ey) : 0;
+        va[2] = ez ? SvNV(*ez) : 0;
+        qrot_vec(qa, va, ra);
+        qb_set(aTHX_ ox, i, ra[0]);
+        qb_set(aTHX_ oy, i, ra[1]);
+        qb_set(aTHX_ oz, i, ra[2]);
+    }
+EOXS
+
 pp_done();

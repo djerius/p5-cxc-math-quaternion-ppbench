@@ -44,6 +44,20 @@ Claude did this.
   - [Results](#results-3)
   - [Analysis](#analysis-3)
   - [Conclusions for the pure-Perl implementation](#conclusions-for-the-pure-perl-implementation)
+- [Shared C implementation: XS on Perl data](#shared-c-implementation-xs-on-perl-data)
+  - [Question](#question-2)
+  - [Hypotheses](#hypotheses-3)
+  - [Benchmark (xs.pl)](#benchmark-xspl)
+  - [Results](#results-4)
+  - [Analysis](#analysis-4)
+  - [Conclusions for the XS implementation](#conclusions-for-the-xs-implementation)
+- [Writing into existing Perl arrays](#writing-into-existing-perl-arrays)
+  - [Question](#question-3)
+  - [Hypotheses](#hypotheses-4)
+  - [Benchmark (xsinto.pl, svlayout.pl)](#benchmark-xsintopl-svlayoutpl)
+  - [Results](#results-5)
+  - [Analysis](#analysis-5)
+  - [Conclusions for writing into existing arrays](#conclusions-for-writing-into-existing-arrays)
 - [Caveats and open questions](#caveats-and-open-questions)
 
 These benchmarks were run to help design `CXC::Math::Quaternion`. The
@@ -77,8 +91,12 @@ perl Makefile.PL
 make
 ```
 
-This compiles the PP module `QBench` (`rotq`, `rotm`, `rotq3`) from
-[qbench.pd](qbench.pd) into `blib/`.
+This compiles the module `QBench` from [qbench.pd](qbench.pd) into
+`blib/`. It contains the PP kernels (`rotq`, `rotm`, `rotq3`,
+`rotq_shared`) and plain XS functions on Perl data (`xs_rot1`,
+`xs_rot1_list`, `xs_rot_aoa`, `xs_rot_cols`, and the `_into` variants
+`xs_rot1_into`, `xs_rot_aoa_into`, `xs_rot_cols_into`). `rotq_shared`
+and the XS functions share the C code in [qrot.h](qrot.h).
 - **No `make install` is needed.** Each script finds the module in the
   `blib/` next to it, using `FindBin`, so the scripts can be run from
   any directory.
@@ -104,6 +122,9 @@ perl nfs.pl       # zeroes vs. new_from_specification outputs      (~35 s)
 perl ovh.pl       # fixed per-call costs at N = 1 and 1000         (~20 s)
 perl ovh2.pl      # ndarray construction vs. destruction           (~2 s)
 perl pureperl.pl  # pure-Perl rotation vs. PDL, conversions        (~2 min)
+perl xs.pl        # XS on Perl data vs. pure Perl; shared PP kernel (~70 s)
+perl xsinto.pl    # writing into existing arrays vs. new arrays    (~70 s)
+perl svlayout.pl clean; perl svlayout.pl churn   # scalar layout   (~30 s)
 ```
 
 To see the effect of glibc's mmap threshold, run [mmap.pl](mmap.pl),
@@ -130,10 +151,13 @@ perl results/min.pl results/cols-default-?.txt > results/cols-default-min.txt
 perl results/min.pl results/cols-nommap-?.txt  > results/cols-nommap-min.txt
 ```
 
-`results/ovh-min.txt` came from a similar three-run loop over
-[ovh.pl](ovh.pl), with the minimum taken separately. `min.pl` only
-recognises rows that start with an `N` such as `1e+03`, so it does not
-handle `ovh.pl`'s rows.
+The other `results/*-min.txt` files were made the same way, from three
+runs of [nfs.pl](nfs.pl), [ovh.pl](ovh.pl), [pureperl.pl](pureperl.pl)
+[xs.pl](xs.pl) and [xsinto.pl](xsinto.pl). (`results/svlayout.txt` is
+simply the six runs of [svlayout.pl](svlayout.pl), in order.) `min.pl`
+matches lines by position and replaces
+every plain decimal number with its minimum over the runs, so it works
+on any of the scripts' output.
 
 Timings on a laptop or a shared machine vary by 10–30% from run to
 run, so compare ratios rather than absolute numbers.
@@ -231,6 +255,21 @@ run, so compare ratios rather than absolute numbers.
   forms. It compares them with the PP kernels, both with data already
   in ndarrays and with Perl data converted to ndarrays and back. See
   [Pure-Perl baseline](#pure-perl-baseline).
+  - The pure-Perl implementations live in [QRotPerl.pm](QRotPerl.pm),
+    shared with [xs.pl](xs.pl).
+- [qrot.h](qrot.h) holds the rotation as one `static inline` C
+  function, `qrot_vec`, with no Perl or PDL API. Two front ends in
+  [qbench.pd](qbench.pd) use it:
+  - the PP kernel `rotq_shared`;
+  - plain XS functions that read and write Perl arrays and scalars.
+- [xs.pl](xs.pl) compares those XS functions with the pure-Perl code,
+  and `rotq_shared` with the hand-written `rotq`. See
+  [Shared C implementation: XS on Perl data](#shared-c-implementation-xs-on-perl-data).
+- [xsinto.pl](xsinto.pl) compares XS and pure-Perl functions that
+  write into arrays the caller supplies (the `_into` variants) with the
+  versions that return new arrays. [svlayout.pl](svlayout.pl) checks
+  how the memory layout of Perl scalars affects XS on large arrays. See
+  [Writing into existing Perl arrays](#writing-into-existing-perl-arrays).
 
 ### Method
 
@@ -388,8 +427,9 @@ $`10^7`$ (≈ 16–20 ns). Three measurements isolate the cause:
 
 ## Conclusions
 
-Conclusions are numbered [C1](#c1)–[C19](#c19) through the whole document, like the
-hypotheses ([H1](#h1)–[H10](#h10)), so later sections can refer to earlier ones.
+Conclusions are numbered [C1](#c1)–[C28](#c28) through the whole
+document, like the hypotheses ([H1](#h1)–[H15](#h15)), so later
+sections can refer to earlier ones.
 
 - <a id="c1"></a>**C1: Write the `CXC::Math::Quaternion` vector core in PDL::PP.** It is
   2–4× faster than `x` and 8–30× faster than `PDL::Transform`. It also
@@ -1019,19 +1059,444 @@ available to callers whose data is *already* in ndarrays.
   about 0.8 µs of matrix construction.
 - <a id="c17"></a>**C17: Choose the implementation by the type of the input, not by
   whether PDL is installed.**
-  - Perl arrays in, Perl arrays out: always use the pure-Perl code.
-    Converting to ndarrays and back is slower for arrays of `[x,y,z]`,
-    and at best 1.4× faster for columns.
+  - Perl arrays in, Perl arrays out: never go through PDL.
+    Converting to ndarrays and back is slower than pure Perl for arrays
+    of `[x,y,z]`, and at best 1.4× faster for columns. Use XS when it is
+    available and pure Perl otherwise ([C21](#c21)).
   - ndarrays in: use the PP kernels.
   - Do not quietly "upgrade" Perl data to PDL inside the module.
 - <a id="c18"></a>**C18: The scalar API (one quaternion, one vector as Perl values) should
-  be pure Perl even when PDL is available.** That costs about 1.4 µs,
-  against about 1.8 µs with data already in ndarrays, and 7.9 µs if
-  the values have to be converted to ndarrays first.
+  not use PDL, even when PDL is available.** In pure Perl it costs
+  about 1.4 µs, against about 1.8 µs with data already in ndarrays, and
+  7.9 µs if the values have to be converted to ndarrays first. XS is
+  faster still ([C23](#c23)).
 - <a id="c19"></a>**C19: Tell users who want PDL speed to keep their data in ndarrays.**
   Pure Perl is about 100× slower than the PP kernels at large $`N`$.
   If users must convert, three column arrays (`pdl(\@x)`) convert
   about 10× faster than an array of `[x,y,z]` refs (`pdl(\@aoa)`).
+
+## Shared C implementation: XS on Perl data
+
+### Question
+
+The plan for `CXC::Math::Quaternion` includes one C implementation
+of the quaternion math, shared by two front ends:
+- PDL::PP kernels for ndarrays;
+- plain XS functions for Perl data, which do not need PDL.
+
+The pure-Perl code stays as the fallback when no compiler is
+available. This section asks:
+
+1. Does routing the PP kernel through a shared C function cost
+   anything?
+2. How much faster is XS on Perl data than pure Perl?
+3. Where does XS stand against PDL?
+
+### Hypotheses
+
+- <a id="h11"></a>**H11: the shared C function costs nothing in the PP kernel.** The
+  function is `static inline` in a header, so the compiler should
+  produce the same code as the hand-written `rotq`.
+- <a id="h12"></a>**H12: XS on Perl data is several times faster than pure Perl, but
+  far slower than PP on ndarrays.** The arithmetic is a few ns per
+  vector in C. What remains is reading Perl scalars (`av_fetch`,
+  `SvNV`) and creating new ones (`newSVnv`, `newAV`). That should cost
+  tens of ns per vector, against about 500 ns for pure Perl and about
+  5 ns for PP.
+- <a id="h13"></a>**H13: for a single vector, XS beats both pure Perl and PDL.** An XS
+  call has far less fixed cost than a PDL call (about 1 µs, see
+  [H8](#h8)), and does no interpreted arithmetic.
+
+### Benchmark ([xs.pl](xs.pl))
+
+The shared code is [qrot.h](qrot.h): one `static inline` function,
+`qrot_vec(q, v, r)`, written in plain C with no Perl or PDL API. It
+uses the same quaternion formula as `rotq`. [qbench.pd](qbench.pd)
+includes it with `pp_addhdr`, so it is visible both to the PP kernels
+and to the XS code added with `pp_addxs`:
+
+| Function | Front end | Input → output |
+|----------|-----------|----------------|
+| `rotq_shared($q, $v)` | PP | Same signature as `rotq`. The kernel body copies `$q()`/`$v()` into local arrays and calls `qrot_vec`. |
+| `xs_rot1(\@q, \@v)` | XS | One vector as an array ref → new `[x,y,z]` |
+| `xs_rot1_list(@q, @v)` | XS | Seven scalars → list of three scalars |
+| `xs_rot_aoa(\@q, \@aoa)` | XS | Array of `[x,y,z]` → new array of `[x,y,z]` |
+| `xs_rot_cols(\@q, \@x, \@y, \@z)` | XS | Three column arrays → three new column arrays |
+
+- The XS functions check their arguments (array refs, lengths) and
+  `croak` on bad input, as a real module would.
+- They read elements with `av_fetch` and `SvNV`, so they handle any
+  numeric scalar.
+- Here they share one shared object with the PP code, for convenience.
+  In the real module the XS part would be built without PDL, from the
+  same header.
+
+The pure-Perl counterparts are the subs from the
+[Pure-Perl baseline](#pure-perl-baseline), now in
+[QRotPerl.pm](QRotPerl.pm), plus `rot1_list` (seven scalars in, three
+out).
+- Moving them into a module did not change their speed. An A/B test of
+  the module sub against an inline copy, in one process, gave 818–843
+  against 821–834 ns per vector.
+- The machine was busier during these runs (load average about 2.1,
+  against 1.3 for the pure-Perl section). That made pure Perl up to
+  about 15% slower than in the earlier tables. To keep the comparison fair,
+  pure Perl and XS are timed side by side in the same runs, and only
+  those numbers are compared here.
+
+The tables:
+- **(1) One vector per call.** Each timed closure makes 1000 calls, so
+  the closure's own cost is spread out. An empty loop of 1000
+  iterations is the baseline: 14 ns per iteration.
+- **(2) $`N`$ vectors per call.**
+- **(3) `rotq_shared` against `rotq`,** with fresh and preallocated
+  outputs.
+
+All results agree exactly ($`\lvert \Delta\rvert = 0`$): XS against
+pure Perl, and `rotq_shared` against `rotq`.
+
+Same protocol as before: ≥ 0.5 s per cell, 3 runs, per-cell minimum.
+- Raw output: `results/xs-{1,2,3}.txt`.
+- Minima: [results/xs-min.txt](results/xs-min.txt).
+
+### Results
+
+**(1) One vector per call**, ns per call:
+
+| Call | ns |
+|------|---:|
+| empty loop (baseline) | 14 |
+| Perl `rot1(\@q, \@v)` → `[..]` | 979 |
+| XS `xs_rot1(\@q, \@v)` → `[..]` | 288 |
+| Perl `rot1_list(@q, @v)` → list | 877 |
+| XS `xs_rot1_list(@q, @v)` → list | 178 |
+| PDL `rotq($q, $v)`, ndarrays | 1487 |
+| PDL `rotq($q, $v, $r)`, preallocated | 948 |
+
+**(2) $`N`$ vectors per call**, ns per vector. "Perl" is the
+quaternion form and "Perl mat" the matrix form ([C15](#c15)):
+
+|     N | Perl aoa | Perl mat | XS aoa | Perl cols | Perl mat | XS cols | PDL rotq (ndarrays) |
+|------:|---------:|---------:|-------:|----------:|---------:|--------:|--------------------:|
+|     1 |     1431 |     2277 |    485 |      1818 |     2560 |     612 |              1706.8 |
+|     3 |     1011 |     1075 |    246 |      1151 |     1178 |     263 |               689.5 |
+|    10 |      951 |      756 |    186 |      1037 |      815 |     129 |               215.4 |
+|    30 |      913 |      650 |    168 |       956 |      677 |      84 |                70.1 |
+|  1e2  |      863 |      552 |    155 |       833 |      576 |      72 |                25.8 |
+|  1e3  |      814 |      557 |    168 |       773 |      488 |      64 |                 8.5 |
+|  1e4  |      828 |      526 |    168 |       757 |      488 |      69 |                 5.7 |
+|  1e5  |      770 |      503 |    182 |       780 |      633 |     204 |                 6.4 |
+|  1e6  |      786 |      521 |    209 |       773 |      674 |     340 |                 4.5 |
+
+**(3) PP kernels**, ns per vector:
+
+|     N | rotq | rotq_shared | rotq, prealloc | rotq_shared, prealloc |
+|------:|-----:|------------:|---------------:|----------------------:|
+|  1e2  | 25.3 |        24.4 |           17.1 |                  16.7 |
+|  1e4  |  5.7 |         5.7 |            5.2 |                   5.2 |
+|  1e6  |  4.4 |         4.5 |            3.3 |                   3.6 |
+|  1e7  | 16.9 |        17.4 |            3.3 |                   3.3 |
+
+### Analysis
+
+**[H11](#h11): the shared C function costs nothing (confirmed).**
+`rotq_shared` and `rotq` agree within the run-to-run noise at every
+$`N`$, with fresh or preallocated outputs (for example 5.7 against
+5.7 ns, and 3.3 against 3.3 ns). The compiler inlines `qrot_vec`, so
+the copies into local arrays disappear. Writing the math once, in a
+plain-C header, has no cost on the PDL side.
+
+**[H12](#h12): XS on Perl data is 2–8× faster than the best pure Perl,
+and up to 75× slower than PP on ndarrays (confirmed).**
+- **Arrays of `[x,y,z]`:** XS costs 155–209 ns per vector for
+  $`N \ge 10`$. That is 2.5–4× faster than the pure-Perl matrix form
+  (503–756 ns), and 4–5.5× faster than the quaternion form.
+- **Column arrays:** XS costs 64–84 ns per vector at $`N = 30`$ to
+  $`10^4`$, 7–8× faster than the pure-Perl matrix form (488–677 ns).
+- **Where XS spends its time.** The arithmetic is a small part: the PP
+  kernel does the whole rotation, memory traffic included, in about
+  5 ns per vector. The rest is Perl data handling:
+  - each input number costs an `av_fetch` and an `SvNV`;
+  - each output number costs a `newSVnv` and an `av_store`;
+  - the array-of-`[x,y,z]` form also creates a new array and a
+    reference for every output vector.
+
+  That is why columns are 2–2.6× cheaper than arrays of `[x,y,z]`
+  in XS (64–84 against 155–168 ns), while in pure Perl the two layouts
+  cost about the same.
+- **Large $`N`$.** At $`10^5`$–$`10^6`$, XS columns slow to 204–340 ns
+  per vector, and their lead over pure Perl falls to 2–3×. Each call
+  creates millions of new scalars and frees the previous call's
+  millions. That costs about 250 ns per vector at $`10^6`$, even in a
+  fresh process ([H15](#h15)). Pure Perl was already slow per element,
+  so it degrades much less.
+- **Against PDL:** PP on data already in ndarrays is 3–6× faster than
+  XS at $`N = 100`$, and 7.5–75× faster for $`N \ge 10^3`$ (4.5–8.5
+  against 64–340 ns), because it never touches a Perl scalar per
+  element.
+  - XS columns beat PDL up to about $`N = 20`$ (129 against 215 ns at
+    $`N = 10`$; 84 against 70 ns at $`N = 30`$).
+  - XS arrays of `[x,y,z]` beat PDL up to about $`N = 10`$.
+
+**[H13](#h13): for one vector, XS beats both (confirmed).**
+- `xs_rot1_list` takes 178 ns per call (about 165 ns over the empty
+  loop). That is 4.9× faster than pure Perl's `rot1_list` (877 ns),
+  and 5–8× faster than PDL (948–1487 ns).
+- Returning a new `[x,y,z]` (`xs_rot1`, 288 ns) costs about 110 ns
+  more than returning three scalars, for the array and the reference.
+  It is still 3.4× faster than pure Perl's `rot1` (979 ns).
+
+### Conclusions for the XS implementation
+
+- <a id="c20"></a>**C20: Keep the quaternion math in one plain-C header, shared by the
+  PP kernels and the XS functions.** It costs nothing on the PP side
+  ([H11](#h11)). The header uses no Perl or PDL API, so the XS module
+  can be built without PDL.
+- <a id="c21"></a>**C21: For Perl data, use XS when it is available and pure Perl
+  otherwise.** XS is 2–8× faster than the best pure-Perl form for
+  many vectors, and 3.4–4.9× faster for one. Pure Perl is still needed
+  as the fallback when no compiler is available. Neither path should
+  convert to PDL ([C17](#c17)).
+- <a id="c22"></a>**C22: The bulk XS API on Perl data should prefer column arrays over
+  arrays of `[x,y,z]`.** Columns are 2–2.6× cheaper in XS (64–84
+  against 155–168 ns per vector), because an array of `[x,y,z]` needs
+  a new array and reference for every output vector. This matches the
+  ndarray-side column support ([C7](#c7)). It applies to functions
+  that return new arrays. When writing into existing arrays, the two
+  layouts cost about the same ([C26](#c26)).
+- <a id="c23"></a>**C23: The scalar API should take and return plain scalars.**
+  `xs_rot1_list` costs 178 ns per call, against 288 ns for the
+  array-ref form, about 1 µs for pure Perl, and 1–1.5 µs for PDL.
+  Writing into an existing `[x,y,z]` (`xs_rot1_into`) is nearly as
+  fast as the list form ([C27](#c27)).
+- <a id="c24"></a>**C24: XS does not replace PDL for large data.** Every element of
+  Perl data costs tens of ns in XS just to read and write. PP on
+  ndarrays is 7.5–75× faster for $`N \ge 10^3`$. That reinforces
+  [C19](#c19): users with large data should keep it in ndarrays.
+
+## Writing into existing Perl arrays
+
+### Question
+
+The XS functions in the previous section return new arrays. For each
+output vector they create new scalars, and for arrays of `[x,y,z]` also
+a new inner array and a reference. The analysis there
+([H12](#h12)) found that this Perl data handling, not the arithmetic,
+is where XS spends its time. So:
+
+1. How much faster is XS when it writes into arrays the caller already
+   has?
+2. Does pure Perl gain the same way?
+3. Does writing in place, with the input array as the output, help
+   further?
+
+### Hypotheses
+
+- <a id="h14"></a>**H14: writing into existing arrays removes most of XS's per-vector
+  cost for arrays of `[x,y,z]`, less for columns, and little for pure
+  Perl.**
+  - The array-of-`[x,y,z]` form creates five things per vector (an
+    array, a reference and three scalars), so it should gain most.
+  - The column form creates three scalars per vector, so it should
+    gain less.
+  - Pure Perl's cost is mostly interpreting the arithmetic, so it
+    should gain little.
+- <a id="h15"></a>**H15 (added after the first run): XS's slowdown on large column
+  arrays comes from where the scalars sit in memory, not from the
+  `_into` code.** In the first run, writing into separate column
+  arrays was as slow as creating new ones at $`N \ge 10^5`$ (about
+  260 ns per vector), while writing in place stayed at about 45 ns.
+  - Perl reuses freed scalars in an order that has nothing to do with
+    array index.
+  - The "new arrays" measurement just before it, in the same process,
+    creates and frees millions of scalars on every call.
+  - Arrays filled after that point have their scalars scattered, so
+    walking them by index misses the cache.
+
+### Benchmark ([xsinto.pl](xsinto.pl), [svlayout.pl](svlayout.pl))
+
+New functions, all in [qbench.pd](qbench.pd) and
+[QRotPerl.pm](QRotPerl.pm):
+
+| Function | Writes into |
+|----------|-------------|
+| `xs_rot1_into(\@q, \@v, \@r)` | `@r` (three elements) |
+| `xs_rot_aoa_into(\@q, \@vs, \@rs)` | `@rs`, an array of `[x,y,z]` |
+| `xs_rot_cols_into(\@q, \@x, \@y, \@z, \@rx, \@ry, \@rz)` | `@rx`, `@ry`, `@rz` |
+| `rot1_into`, `rot_aoa_mat_into`, `rot_cols_mat_into` | the same, in pure Perl (matrix form for the bulk versions, [C15](#c15)) |
+
+- **Reuse.** The XS versions set existing scalars with `sv_setnv` and
+  write into existing inner `[x,y,z]` arrays.
+  - Missing elements, and elements that are not array refs, are
+    created. So the first call into an empty array allocates, and later
+    calls reuse.
+  - Output arrays are not truncated: an output longer than the input
+    keeps its extra elements.
+  - A read-only output element raises Perl's usual "Modification of a
+    read-only value" error.
+- **In place.** The output may be the input itself. Each vector is read
+  before it is written.
+- **Pure Perl** assigns to existing elements (`$r->[0] = …`), which
+  also reuses the scalars.
+- **Correctness.** Every `_into` result agrees exactly with the
+  corresponding new-array function, including in-place use.
+
+[xsinto.pl](xsinto.pl) times four kinds of call for each layout:
+- the new-array version;
+- the `_into` version, into a separate output that already holds the
+  previous call's results ("into");
+- the `_into` version with the input as the output ("in place");
+- for columns, `rotq3` on ndarrays with preallocated outputs, for
+  reference.
+
+Same protocol as before (3 runs, per-cell minimum, ≥ 0.5 s per cell):
+raw `results/xsinto-{1,2,3}.txt`, minima in
+[results/xsinto-min.txt](results/xsinto-min.txt).
+
+These runs include an `av_extend(v, 2)` on every inner `[x,y,z]` array
+in `xs_rot_aoa_into`. It guarantees room for three elements through
+the documented API, rather than relying on how much Perl happens to
+allocate. An A/B test against a build without it (four alternating
+processes per build, $`N = 10^3`$ and $`10^4`$) gave 57–65 against
+54–61 ns per vector, so its cost is within the noise (about 2 ns).
+
+After these runs, `av_extend` was also added to `xs_rot1_into` (for its
+three-element output) so that every function that writes into an array
+reserves the room first; `xs_rot_aoa_into` now calls it on the outer
+array unconditionally, once per call. Table (1) was measured before
+that change. A separate A/B test of `xs_rot1_into` (four alternating
+processes per build) gave 193–214 ns per call with the call and 181–209
+without, so it adds about 10 ns (about 5%), barely above the noise.
+
+[svlayout.pl](svlayout.pl) tests [H15](#h15) at $`N = 10^6`$ on
+columns. Each run is a fresh process that builds the input and output
+arrays and then times "into", "in place" and "new". The two modes
+differ in one step:
+- `clean`: the arrays are built straight away;
+- `churn`: the process first creates and frees 3 × 3 million scalars,
+  as a new-array benchmark does.
+
+It was run three times in each mode, alternating:
+[results/svlayout.txt](results/svlayout.txt).
+
+### Results
+
+**(1) One vector per call**, ns per call:
+
+| Call | ns |
+|------|---:|
+| empty loop (baseline) | 15 |
+| Perl `rot1` → new | 1021 |
+| Perl `rot1_into` → into | 1015 |
+| XS `xs_rot1` → new | 291 |
+| XS `xs_rot1_into` → into | 187 |
+| XS `xs_rot1_list` → list | 176 |
+
+**(2) Array of `[x,y,z]`**, ns per vector:
+
+|     N | Perl new | Perl into | XS new | XS into | XS in place |
+|------:|---------:|----------:|-------:|--------:|------------:|
+|     1 |     2157 |      2126 |    472 |     361 |         317 |
+|    10 |      726 |       642 |    178 |      91 |          89 |
+|  1e2  |      552 |       515 |    150 |      69 |          66 |
+|  1e3  |      560 |       509 |    174 |      68 |          67 |
+|  1e4  |      551 |       509 |    182 |      70 |          62 |
+|  1e5  |      553 |       474 |    194 |      82 |          67 |
+|  1e6  |      566 |       484 |    214 |      81 |          64 |
+
+**(3) Three column arrays**, ns per vector:
+
+|     N | Perl new | Perl into | XS new | XS into | XS in place | PDL `rotq3`, prealloc |
+|------:|---------:|----------:|-------:|--------:|------------:|----------------------:|
+|     1 |     2469 |      2241 |    582 |     321 |         312 |                1598.0 |
+|    10 |      763 |       619 |    114 |      71 |          70 |                 163.9 |
+|  1e2  |      551 |       452 |     65 |      45 |          43 |                  21.7 |
+|  1e3  |      463 |       429 |     63 |      48 |          44 |                   7.3 |
+|  1e4  |      454 |       446 |     76 |      55 |          42 |                   5.9 |
+|  1e5  |      624 |       676 |    268 |     258 |          44 |                   5.8 |
+|  1e6  |      566 |       540 |    252 |     260 |          45 |                   6.7 |
+
+**(4) Scalar layout, $`N = 10^6`$ columns** ([svlayout.pl](svlayout.pl)),
+ns per vector, range over 3 fresh processes per mode:
+
+| Mode | XS into | XS in place | XS new |
+|------|--------:|------------:|-------:|
+| `clean` | 43–48 | 43–45 | 254–256 |
+| `churn` | 72–81 | 54–59 | 245–258 |
+
+### Analysis
+
+**[H14](#h14): writing into existing arrays makes XS 2.2–2.6× faster for
+arrays of `[x,y,z]`, about 1.4× for columns, and pure Perl only a
+little (confirmed).**
+- **Arrays of `[x,y,z]`:** XS goes from 150–182 to 68–70 ns per vector
+  for $`N = 10^2`$–$`10^4`$. That is 2.2–2.6× faster, and about 7.5×
+  faster than pure Perl writing into existing arrays (509–515 ns).
+- **Columns:** XS goes from 63–76 to 45–55 ns per vector in the same
+  range, 1.3–1.45× faster, and 8–10× faster than pure Perl writing
+  into existing arrays.
+- **Layout no longer matters much in XS.** With new arrays, columns
+  were 2.3–2.8× cheaper than arrays of `[x,y,z]` in these runs
+  ([C22](#c22)). When writing into existing arrays the gap shrinks to
+  1.3–1.5× (45–55 against 68–70 ns), because the per-vector inner array and reference
+  are no longer created.
+- **In place** is slightly faster again (62–67 ns per vector for arrays
+  of `[x,y,z]`, 42–44 ns for columns), since each scalar is read and
+  written while it is in cache.
+- **Pure Perl** gains little from writing into existing arrays: between
+  −8% and +19% across the cells, mostly 5–15%. As expected, its cost
+  is interpreting the arithmetic.
+- **One vector:** `xs_rot1_into` (187 ns) is 1.6× faster than
+  `xs_rot1` (291 ns), and about as fast as `xs_rot1_list` (176 ns).
+  Pure Perl's `rot1_into` gains nothing (1015 against 1021 ns).
+- **Against PDL:** writing into existing arrays narrows the gap to
+  ndarrays, but does not close it. For columns, PP with preallocated
+  outputs is still 6–9.5× faster for $`N \ge 10^3`$ (5.8–7.3 against
+  42–55 ns). XS beats PDL somewhere between $`N = 10`$ and 100 (71
+  against 164 ns at $`N = 10`$; 45 against 22 ns at $`N = 100`$).
+
+**[H15](#h15): the large-$`N`$ slowdown for separate output columns is a
+layout effect (confirmed).**
+- In a fresh process ([svlayout.pl](svlayout.pl) `clean`), writing
+  into separate output columns at $`N = 10^6`$ costs 43–48 ns per
+  vector. That is the same as in cache, and nowhere near the 258–260 ns
+  measured in [xsinto.pl](xsinto.pl).
+- After freeing 9 million scalars first (`churn`), the same call costs
+  72–81 ns, and in place 54–59 ns. Arrays built from reused, scattered
+  scalars are slower to walk.
+- In [xsinto.pl](xsinto.pl), the output columns are filled right after
+  the "XS new" cell has run for half a second, creating and freeing
+  millions of scalars per call. That scatters them far more than
+  `churn` does, which explains the 258–260 ns.
+- The new-array functions cost about 250 ns per vector at $`10^6`$ in
+  both modes. That cost comes from creating 3 million scalars and
+  freeing the previous 3 million on every call, whatever the layout.
+- So the "XS into" figures for columns at $`N \ge 10^5`$ in table (3)
+  overstate the intrinsic cost. Measured in a fresh process, writing
+  into existing arrays is **5–6× faster than creating new ones** at
+  $`10^6`$ (43–48 against about 250 ns). Arrays of `[x,y,z]` are less
+  affected (81–82 ns into, 64–67 in place), presumably because each
+  inner array's three scalars were created together.
+
+### Conclusions for writing into existing arrays
+
+- <a id="c25"></a>**C25: Offer `_into` variants in the XS API for bulk Perl data.** The
+  caller passes output arrays, which are filled on first use and
+  reused afterwards. In-place use (output = input) should be allowed.
+  - Arrays of `[x,y,z]`: 2.2–2.6× faster than returning new arrays.
+  - Columns: 1.3–1.45× faster in cache, and 5–6× faster at $`10^6`$
+    measured in a fresh process.
+- <a id="c26"></a>**C26: With `_into`, both Perl layouts are acceptable.** Arrays of
+  `[x,y,z]` and column arrays are within 1.3–1.5× of each other, so
+  the preference for columns ([C22](#c22)) only matters for functions
+  that return new arrays.
+- <a id="c27"></a>**C27: For one vector, `xs_rot1_into` and the list form are about
+  equally fast (187 and 176 ns).** Either suits the scalar API ([C23](#c23)).
+  Choose for convenience: the list form for one-off calls, `_into`
+  when the caller keeps a result array.
+- <a id="c28"></a>**C28: Pure Perl does not need `_into` for speed (mostly a 5–15% gain).** It
+  is still worth providing for API symmetry with XS, so that code
+  works the same with either backend ([C21](#c21)).
 
 ## Caveats and open questions
 
@@ -1050,6 +1515,17 @@ available to callers whose data is *already* in ndarrays.
   - Faster ways to build an ndarray from Perl data, such as `pack 'd*'`
     into the data of a `new_from_specification` ndarray, were not
     measured.
+- Flat Perl arrays, and `pack`ed strings of doubles as XS input, were
+  not measured.
+- Large-$`N`$ timings on Perl data depend on where Perl's allocator put
+  the scalars, which depends on what the process allocated and freed
+  before ([H15](#h15)). The XS figures for Perl data at
+  $`N \ge 10^5`$ should be read with that in mind, and future
+  benchmarks of Perl data at that size should run each case in a fresh
+  process.
+- Here the XS functions are linked into the same shared object as the
+  PP code. A separate XS module without PDL should perform the same,
+  but that was not measured.
 - Quaternion–quaternion products, normalisation and the
   RA/Dec/Roll ↔ quaternion conversions were not benchmarked. They are
   expected to behave like `rotq`: one pass, no temporaries.

@@ -1,6 +1,7 @@
 use strict; use warnings;
-use FindBin; use lib "$FindBin::Bin/blib/lib", "$FindBin::Bin/blib/arch";
+use FindBin; use lib "$FindBin::Bin/blib/lib", "$FindBin::Bin/blib/arch", $FindBin::Bin;
 use PDL; use QBench; use Time::HiRes qw(time);
+use QRotPerl;
 
 # Pure-Perl rotation baselines vs. the PP kernels.
 # Vectors in Perl are either an array of [x,y,z] refs (AoA) or three column arrays.
@@ -10,82 +11,6 @@ my @q = (0.1, -0.3, 0.5, 0.8);
 my $qp = pdl(@q);
 
 sub bench { my ($c)=@_; $c->(); my ($n,$t0)=(0,time); do { $c->(); $n++ } while time-$t0 < 0.5; (time-$t0)/$n }
-
-# one vector per call: the scalar API
-sub rot1 {
-    my ($q, $v) = @_;
-    my ($x, $y, $z, $w) = @$q;
-    my ($vx, $vy, $vz) = @$v;
-    my $tx = 2*($y*$vz - $z*$vy); my $ty = 2*($z*$vx - $x*$vz); my $tz = 2*($x*$vy - $y*$vx);
-    return [ $vx + $w*$tx + ($y*$tz - $z*$ty),
-             $vy + $w*$ty + ($z*$tx - $x*$tz),
-             $vz + $w*$tz + ($x*$ty - $y*$tx) ];
-}
-
-# AoA, quaternion form, loop inlined
-sub rot_aoa {
-    my ($q, $vs) = @_;
-    my ($x, $y, $z, $w) = @$q;
-    my @r;
-    for my $v (@$vs) {
-        my ($vx, $vy, $vz) = @$v;
-        my $tx = 2*($y*$vz - $z*$vy); my $ty = 2*($z*$vx - $x*$vz); my $tz = 2*($x*$vy - $y*$vx);
-        push @r, [ $vx + $w*$tx + ($y*$tz - $z*$ty),
-                   $vy + $w*$ty + ($z*$tx - $x*$tz),
-                   $vz + $w*$tz + ($x*$ty - $y*$tx) ];
-    }
-    return \@r;
-}
-
-sub matrix {
-    my ($x, $y, $z, $w) = @{$_[0]};
-    return ( 1-2*($y*$y+$z*$z), 2*($x*$y-$z*$w),   2*($x*$z+$y*$w),
-             2*($x*$y+$z*$w),   1-2*($x*$x+$z*$z), 2*($y*$z-$x*$w),
-             2*($x*$z-$y*$w),   2*($y*$z+$x*$w),   1-2*($x*$x+$y*$y) );
-}
-
-# AoA, rotation matrix computed once per call
-sub rot_aoa_mat {
-    my ($q, $vs) = @_;
-    my ($m0,$m1,$m2,$m3,$m4,$m5,$m6,$m7,$m8) = matrix($q);
-    my @r;
-    for my $v (@$vs) {
-        my ($vx, $vy, $vz) = @$v;
-        push @r, [ $m0*$vx + $m1*$vy + $m2*$vz,
-                   $m3*$vx + $m4*$vy + $m5*$vz,
-                   $m6*$vx + $m7*$vy + $m8*$vz ];
-    }
-    return \@r;
-}
-
-# three columns in, three columns out, quaternion form
-sub rot_cols {
-    my ($q, $cx, $cy, $cz) = @_;
-    my ($x, $y, $z, $w) = @$q;
-    my (@rx, @ry, @rz);
-    for my $i (0 .. $#$cx) {
-        my ($vx, $vy, $vz) = ($cx->[$i], $cy->[$i], $cz->[$i]);
-        my $tx = 2*($y*$vz - $z*$vy); my $ty = 2*($z*$vx - $x*$vz); my $tz = 2*($x*$vy - $y*$vx);
-        push @rx, $vx + $w*$tx + ($y*$tz - $z*$ty);
-        push @ry, $vy + $w*$ty + ($z*$tx - $x*$tz);
-        push @rz, $vz + $w*$tz + ($x*$ty - $y*$tx);
-    }
-    return (\@rx, \@ry, \@rz);
-}
-
-# three columns, rotation matrix
-sub rot_cols_mat {
-    my ($q, $cx, $cy, $cz) = @_;
-    my ($m0,$m1,$m2,$m3,$m4,$m5,$m6,$m7,$m8) = matrix($q);
-    my (@rx, @ry, @rz);
-    for my $i (0 .. $#$cx) {
-        my ($vx, $vy, $vz) = ($cx->[$i], $cy->[$i], $cz->[$i]);
-        push @rx, $m0*$vx + $m1*$vy + $m2*$vz;
-        push @ry, $m3*$vx + $m4*$vy + $m5*$vz;
-        push @rz, $m6*$vx + $m7*$vy + $m8*$vz;
-    }
-    return (\@rx, \@ry, \@rz);
-}
 
 # correctness check against rotq
 {

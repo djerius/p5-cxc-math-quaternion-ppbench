@@ -1,0 +1,6 @@
+clean  N=1e+06  ns/vector:  into  42.9  in place  43.3  new 255.9
+churn  N=1e+06  ns/vector:  into  71.7  in place  54.3  new 258.3
+clean  N=1e+06  ns/vector:  into  48.2  in place  45.4  new 254.5
+churn  N=1e+06  ns/vector:  into  80.9  in place  59.3  new 257.1
+clean  N=1e+06  ns/vector:  into  44.4  in place  44.0  new 255.2
+churn  N=1e+06  ns/vector:  into  73.8  in place  56.7  new 245.2

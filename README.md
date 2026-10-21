@@ -1,6 +1,6 @@
 # Rotating vectors with PDL: PDL::PP vs. PDL::Transform vs. plain PDL
 
-Claude did this.
+I (Claude) wrote the code and this README.  Guidance was provided by Diab Jerius.
 
 ## Contents
 
@@ -516,7 +516,7 @@ The second table measures getting the rotated result:
 
 All variants agree exactly with each other (max $`\lvert \Delta\rvert = 0`$).
 
-I ran each configuration 3 times, alternating between default glibc
+I (Claude) ran each configuration 3 times, alternating between default glibc
 malloc and `MALLOC_MMAP_THRESHOLD_` / `MALLOC_TRIM_THRESHOLD_` = 4 GiB
 (which removes the page-fault penalty described under [H3](#h3)). Each run
 used ≥ 0.5 s per cell. The tables give the **per-cell minimum over the
@@ -803,7 +803,7 @@ against 8.6 ns for `rotq`, and 13.7 against 11.4 ns for `rotq3`. The
 `malloc` and `memset`. The difference lies in **creating the ndarray
 object around it**.
 
-I measured this per call with [ovh.pl](ovh.pl) and
+I (Claude) measured this per call with [ovh.pl](ovh.pl) and
 [ovh2.pl](ovh2.pl), at $`N = 1`$ where the data work is negligible.
 Results are the per-cell minimum of 3 runs,
 [results/ovh-min.txt](results/ovh-min.txt):

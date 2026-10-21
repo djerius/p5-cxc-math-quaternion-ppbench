@@ -1,0 +1,18 @@
+max |diff| vs rotq: matmult 2.2e-16  x 2.2e-16  mmult 2.2e-16  gemm 2.2e-16  broadcast mmult 2.5e-16
+PDL 2.106, PDL::LinearAlgebra 0.437, autopthread targ = 8, OPENBLAS_NUM_THREADS=1
+
+(1) one quaternion, N vectors: ns per vector
+        N      rotq    rotq pre   matmult  x (=mmult)     mmult     gemm pre
+    1e+00    1673.8      1103.9    3438.0      4298.7    1679.7       4636.4
+    1e+02      26.0        16.6      55.1        55.3      27.6         51.1
+    1e+03       7.8         6.6      22.1        10.6       7.7         10.2
+    1e+04       6.1         5.5      18.2         6.4       6.1          6.0
+    1e+05       6.0         5.8      19.3         6.6       6.6          6.2
+    1e+06       4.8         3.7      20.5         8.8       8.8          7.7
+    1e+07      17.3         3.3      32.5        21.7      21.3          7.7
+
+(2) N quaternions, one vector each: ns per vector
+        N      rotq | mmult (mats pre)    build + mmult
+    1e+02      28.6 |            267.7           2257.5
+    1e+04       6.2 |            197.2            413.4
+    1e+06       7.3 |            742.2           1092.8

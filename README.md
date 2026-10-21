@@ -58,6 +58,13 @@ I (Claude) wrote the code and this README.  Guidance was provided by Diab Jerius
   - [Results](#results-5)
   - [Analysis](#analysis-5)
   - [Conclusions for writing into existing arrays](#conclusions-for-writing-into-existing-arrays)
+- [Comparison with PDL::LinearAlgebra](#comparison-with-pdllinearalgebra)
+  - [Question](#question-4)
+  - [Hypotheses](#hypotheses-5)
+  - [Benchmark (lalg.pl, autopthread.pl)](#benchmark-lalgpl-autopthreadpl)
+  - [Results](#results-6)
+  - [Analysis](#analysis-6)
+  - [Conclusions for PDL::LinearAlgebra](#conclusions-for-pdllinearalgebra)
 - [Caveats and open questions](#caveats-and-open-questions)
 
 These benchmarks were run to help design `CXC::Math::Quaternion`. The
@@ -78,6 +85,12 @@ $`10^6`$?
 - Perl with PDL. The results here used perl 5.42.3 and PDL 2.106. The
   build uses PDL::PP and `PDL::Core::Dev`, which come with PDL.
 - A C compiler.
+- For [lalg.pl](lalg.pl) only: PDL::LinearAlgebra, which needs BLAS
+  and LAPACK libraries and a Fortran compiler to build. The results
+  here used PDL::LinearAlgebra 0.437 with OpenBLAS 0.3.26 (pthreads
+  build, which also supplies LAPACK 3.12.0), installed on Ubuntu with
+  `apt-get install libopenblas-dev liblapack-dev`, then
+  `cpanm PDL::LinearAlgebra`.
 - Linux with glibc for the allocation experiments:
   - [faults.pl](faults.pl) reads `/proc/self/stat`.
   - The `MALLOC_*` environment variables below are glibc-specific.
@@ -125,6 +138,9 @@ perl pureperl.pl  # pure-Perl rotation vs. PDL, conversions        (~2 min)
 perl xs.pl        # XS on Perl data vs. pure Perl; shared PP kernel (~70 s)
 perl xsinto.pl    # writing into existing arrays vs. new arrays    (~70 s)
 perl svlayout.pl clean; perl svlayout.pl churn   # scalar layout   (~30 s)
+perl lalg.pl      # PDL::LinearAlgebra (BLAS) vs. PP kernel        (~2 min)
+OPENBLAS_NUM_THREADS=1 perl lalg.pl                # BLAS on one thread
+perl autopthread.pl  # rotq with PDL's threading threshold lowered (~20 s)
 ```
 
 To see the effect of glibc's mmap threshold, run [mmap.pl](mmap.pl),
@@ -152,8 +168,10 @@ perl results/min.pl results/cols-nommap-?.txt  > results/cols-nommap-min.txt
 ```
 
 The other `results/*-min.txt` files were made the same way, from three
-runs of [nfs.pl](nfs.pl), [ovh.pl](ovh.pl), [pureperl.pl](pureperl.pl)
-[xs.pl](xs.pl) and [xsinto.pl](xsinto.pl). (`results/svlayout.txt` is
+runs of [nfs.pl](nfs.pl), [ovh.pl](ovh.pl), [pureperl.pl](pureperl.pl),
+[xs.pl](xs.pl), [xsinto.pl](xsinto.pl), [lalg.pl](lalg.pl) (3 runs with
+each OpenBLAS threading setting, alternating) and
+[autopthread.pl](autopthread.pl). (`results/svlayout.txt` is
 simply the six runs of [svlayout.pl](svlayout.pl), in order.) `min.pl`
 matches lines by position and replaces
 every plain decimal number with its minimum over the runs, so it works
@@ -201,6 +219,7 @@ run, so compare ratios rather than absolute numbers.
 | Perl         | plenv perl 5.42.3, `usemymalloc=n` (system glibc malloc) |
 | PDL          | 2.106, autopthread target 8 threads, size threshold 1 M elements |
 | Compiler     | gcc 13.3.0, `-O2` |
+| BLAS/LAPACK  | OpenBLAS 0.3.26 (pthreads), LAPACK 3.12.0; PDL::LinearAlgebra 0.437 ([lalg.pl](lalg.pl) only) |
 
 ### Code
 
@@ -270,6 +289,11 @@ run, so compare ratios rather than absolute numbers.
   versions that return new arrays. [svlayout.pl](svlayout.pl) checks
   how the memory layout of Perl scalars affects XS on large arrays. See
   [Writing into existing Perl arrays](#writing-into-existing-perl-arrays).
+- [lalg.pl](lalg.pl) compares PDL::LinearAlgebra's BLAS matrix
+  multiply (`mmult`, `gemm`) with the PP kernel and with PDL's own
+  `matmult`. [autopthread.pl](autopthread.pl) times `rotq` with PDL's
+  threading threshold lowered. See
+  [Comparison with PDL::LinearAlgebra](#comparison-with-pdllinearalgebra).
 
 ### Method
 
@@ -427,8 +451,8 @@ $`10^7`$ (≈ 16–20 ns). Three measurements isolate the cause:
 
 ## Conclusions
 
-Conclusions are numbered [C1](#c1)–[C28](#c28) through the whole
-document, like the hypotheses ([H1](#h1)–[H15](#h15)), so later
+Conclusions are numbered [C1](#c1)–[C31](#c31) through the whole
+document, like the hypotheses ([H1](#h1)–[H17](#h17)), so later
 sections can refer to earlier ones.
 
 - <a id="c1"></a>**C1: Write the `CXC::Math::Quaternion` vector core in PDL::PP.** It is
@@ -1498,6 +1522,188 @@ layout effect (confirmed).**
   is still worth providing for API symmetry with XS, so that code
   works the same with either backend ([C21](#c21)).
 
+## Comparison with PDL::LinearAlgebra
+
+### Question
+
+PDL::LinearAlgebra wraps BLAS and LAPACK. Its `mmult` and `gemm`
+multiply matrices with an optimised BLAS library. Rotating vectors by
+a rotation matrix is a matrix multiply, so:
+
+1. Is BLAS faster than the PP quaternion kernel for one quaternion and
+   many vectors?
+2. Can it handle many quaternions, one per vector?
+3. How does it compare with PDL's own matrix multiply?
+
+### Hypotheses
+
+- <a id="h16"></a>**H16: BLAS is no faster than the PP kernel for one quaternion.**
+  Multiplying a 3×3 matrix by a 3×N matrix has an inner dimension of
+  3, so it does very little arithmetic per number read. Like `rotq`,
+  it is limited by memory traffic ([H3](#h3)), and BLAS is tuned for
+  large matrices, where blocking and vectorising the inner loop pay
+  off. At best it should match `rotq`.
+- <a id="h17"></a>**H17: BLAS is much slower for many quaternions, one per vector.**
+  That needs one 3×3 matrix per vector. `mmult` broadcasts over them
+  by calling BLAS once per vector, so every 3×3 product pays the cost
+  of a BLAS call. The matrices also have to be built from the
+  quaternions first.
+
+### Benchmark ([lalg.pl](lalg.pl), [autopthread.pl](autopthread.pl))
+
+[lalg.pl](lalg.pl) times, in ns per vector:
+
+| Label | Call |
+|-------|------|
+| `rotq`, `rotq pre` | the PP kernel, with a fresh or preallocated output |
+| `matmult` | PDL's own matrix multiply, `PDL::matmult($v, $Rt)`, as `x` in [bench.pl](bench.pl) |
+| `x (=mmult)` | `$v x $Rt` with PDL::LinearAlgebra loaded (see below) |
+| `mmult` | `mmult($v, $Rt)`: BLAS `dgemm`, fresh output |
+| `gemm pre` | `gemm($R, 1, 0, $v, 1, 0, $c)`: BLAS `dgemm` into a preallocated `$c` |
+| `mmult (mats pre)` | many quaternions: `mmult($v->dummy(1), $Rs)`, broadcasting over (3,3,N) matrices built beforehand |
+| `build + mmult` | the same, including building the N matrices from the quaternions with PDL operations |
+
+- `gemm` follows BLAS's Fortran convention, in which a PDL `(m,n)`
+  ndarray is an m-row matrix. So the rotation is written as
+  $`C = R_F^{\mathsf T} V`$, with the transpose flag on `$R`.
+- All methods agree with `rotq` to ≤ 2.8e-16.
+- OpenBLAS starts its own thread pool, separate from PDL's automatic
+  threading. [lalg.pl](lalg.pl) was therefore run 3 times with
+  OpenBLAS's default threading and 3 times with
+  `OPENBLAS_NUM_THREADS=1`, alternating. The tables give the per-cell
+  minimum:
+  - [results/lalg-default-min.txt](results/lalg-default-min.txt);
+  - [results/lalg-1thread-min.txt](results/lalg-1thread-min.txt).
+- The machine was busy during these runs (load average 2.5–3.7).
+
+**Loading PDL::LinearAlgebra changes `x` for the whole program.**
+Loading `PDL::LinearAlgebra::Real`, which `PDL::LinearAlgebra` loads,
+replaces the overload of PDL's `x` operator: it goes from
+`PDL::overload_matmult` to the module's BLAS-based
+`PDL::overload_mmult`. In separate processes at $`N = 10^5`$, `x` took
+18.9 ns per vector without the module and 4.9–5.4 ns with it. The
+`PDL::matmult` function itself is not replaced (it is still defined
+in PDL's `Primitive.pd`), so the `matmult` column measures PDL's own
+code. The `x` column in [bench.pl](bench.pl) is likewise PDL's own,
+since that script does not load PDL::LinearAlgebra.
+
+[autopthread.pl](autopthread.pl) follows up a result from
+[lalg.pl](lalg.pl). It times `rotq` with a preallocated output, with
+PDL's default threading threshold (1 M elements) and with the
+threshold set to 0 (always split across threads), back to back in the
+same process. 3 runs, per-cell minimum:
+[results/autopthread-min.txt](results/autopthread-min.txt).
+
+### Results
+
+**(1) One quaternion, $`N`$ vectors**, ns per vector. Each cell gives
+OpenBLAS default threading, then `OPENBLAS_NUM_THREADS=1` in
+parentheses. The PP and PDL columns don't use BLAS, so their two
+values differ only by noise:
+
+|     N | rotq | rotq pre | matmult | x (=mmult) | mmult | gemm pre |
+|------:|-----:|---------:|--------:|-----------:|------:|---------:|
+|     1 | 2150 (1607) | 1183 (1086) | 3375 (3303) | 4380 (4161) | 1893 (1680) | 4873 (4636) |
+|  1e2  | 26.6 (25.0) | 17.8 (16.0) | 56.8 (55.1) | 54.4 (53.5) | 28.7 (27.6) | 55.5 (50.6) |
+|  1e3  |  7.9 (7.7)  |  6.7 (6.4)  | 22.3 (21.4) | 10.8 (10.6) |  8.1 (7.7)  | 10.9 (10.2) |
+|  1e4  |  6.2 (6.1)  |  5.4 (5.5)  | 17.8 (17.9) |  6.6 (6.4)  |  6.4 (6.1)  |  6.1 (6.0)  |
+|  1e5  |  6.0 (6.0)  |  5.4 (5.4)  | 17.6 (18.4) |  4.9 (6.2)  |  4.8 (6.2)  |  2.8 (5.8)  |
+|  1e6  |  4.6 (4.5)  |  3.3 (3.3)  | 19.0 (19.1) |  8.8 (7.8)  | 10.3 (7.8)  |  7.0 (7.0)  |
+|  1e7  | 17.1 (16.9) |  3.3 (3.3)  | 32.0 (32.0) | 28.7 (21.4) | 29.3 (21.3) |  8.0 (7.1)  |
+
+**(2) $`N`$ quaternions, one vector each**, ns per vector (OpenBLAS
+default threading, then one thread):
+
+|     N | rotq | mmult (mats pre) | build + mmult |
+|------:|-----:|-----------------:|--------------:|
+|  1e2  | 26.6 (25.1) | 272 (268) | 2233 (2235) |
+|  1e4  |  6.2 (6.2)  | 206 (196) |  408 (407)  |
+|  1e6  |  6.0 (6.0)  | 827 (740) | 1176 (1091) |
+
+**(3) `rotq` with a preallocated output, PDL threading threshold**
+([autopthread.pl](autopthread.pl)), ns per vector:
+
+|     N | default threshold (1 M elements) | threshold 0 |
+|------:|---------------------------------:|------------:|
+|  1e3  |  7.5 | 228.5 |
+|  1e4  |  6.0 |  25.8 |
+|  1e5  |  6.5 |   4.1 |
+|  3e5  |  6.5 |   3.5 |
+
+### Analysis
+
+**[H16](#h16): BLAS matches the PP kernel at best, and loses at large
+$`N`$ (confirmed, with one exception that comes from threading).**
+- **Up to $`10^4`$ vectors,** `mmult` and `rotq` cost about the same
+  with fresh outputs (for example 6.4 against 6.2 ns at $`10^4`$).
+  `gemm` into a preallocated output is slower than `rotq` into one at
+  small $`N`$ (55.5 against 17.8 ns at $`N = 100`$; 4.9 against 1.2 µs
+  for one vector). It has more per-call cost, presumably in its wrapper;
+  that was not investigated.
+- **At $`N = 10^5`$, OpenBLAS with its default threading wins:** `gemm`
+  2.8 against 5.4 ns for `rotq`, both with preallocated outputs. With
+  `OPENBLAS_NUM_THREADS=1` it is 5.8 ns, no better than `rotq`. So the
+  win comes from threads, not from a faster kernel. OpenBLAS splits
+  this size across threads; PDL does not, because $`10^5`$ vectors are
+  $`3 \times 10^5`$ elements, below PDL's 1 M-element threshold
+  ([C6](#c6)).
+- **At $`10^6`$–$`10^7`$, where PDL threads too,** `rotq` with a
+  preallocated output is 2.1–2.4× faster than `gemm` with one (3.3
+  against 7.0–8.0 ns). `mmult` with fresh outputs is slower still
+  (7.8–29 ns), because it also pays the fresh-output page faults
+  ([H3](#h3)). It is worse with OpenBLAS threading than without at
+  $`10^7`$ (29 against 21 ns).
+- **BLAS against PDL's own `matmult`:** `mmult` is 2.8–3.7× faster than
+  `PDL::matmult` for $`N = 10^4`$–$`10^5`$ (4.8–6.4 against
+  17.6–18.4 ns), and about 2× faster at $`10^6`$. So for code that does
+  use matrices, loading PDL::LinearAlgebra speeds up `x`.
+- **The `x` operator after loading the module** costs the same as
+  `mmult` for $`N \ge 10^4`$. At small $`N`$ it adds Perl-level
+  overhead (54.4 against 28.7 ns at $`N = 100`$; 4.4 against 1.9 µs for
+  one vector).
+
+**[H17](#h17): one matrix per vector is far slower with BLAS (confirmed).**
+- Broadcasting `mmult` over $`N`$ precomputed 3×3 matrices costs
+  196–827 ns per vector, 10–140× slower than `rotq` with $`N`$
+  quaternions (6.0–26.6 ns). Each vector is a separate BLAS call, and
+  the call costs far more than a 3×3 product.
+- Building the matrices from the quaternions with ordinary PDL
+  operations adds about 200–2000 ns per vector more.
+- `rotq` broadcasts over quaternions with no extra cost per vector.
+
+**PDL's threading threshold** ([autopthread.pl](autopthread.pl)):
+- With the threshold at 0, `rotq` is 1.6× faster at $`10^5`$ vectors
+  (4.1 against 6.5 ns) and 1.9× faster at $`3 \times 10^5`$ (3.5
+  against 6.5 ns). That is close to multi-threaded OpenBLAS at
+  $`10^5`$ (2.8 ns).
+- Below that, starting threads costs more than the work: 228.5 against
+  7.5 ns per vector at $`10^3`$, and 25.8 against 6.0 at $`10^4`$.
+- So on this machine, for this kernel, a threshold somewhere between
+  $`10^4`$ and $`10^5`$ vectors ($`3 \times 10^4`$–$`3 \times 10^5`$
+  elements) would be better than PDL's default 1 M elements. It
+  should not be 0.
+
+### Conclusions for PDL::LinearAlgebra
+
+- <a id="c29"></a>**C29: Don't use PDL::LinearAlgebra for rotations.** For one
+  quaternion it is never faster than the PP kernel on the same number
+  of threads, and it is 2.1–2.4× slower at $`10^6`$–$`10^7`$ vectors.
+  For one quaternion per vector it is 10–140× slower. It would also
+  add a dependency on BLAS, LAPACK and a Fortran toolchain. This
+  supports [C1](#c1) and [C2](#c2).
+- <a id="c30"></a>**C30: Don't load PDL::LinearAlgebra from `CXC::Math::Quaternion`,
+  and don't rely on what `x` does.** Loading it replaces PDL's `x`
+  operator for the whole program: about 3× faster for large products, but
+  2× slower than `mmult` for small ones. A library should not change
+  that for its users. Any matrix products the module needs should
+  call a specific function, not `x`.
+- <a id="c31"></a>**C31: Document PDL's threading threshold for mid-sized inputs.** At
+  $`10^5`$–$`3 \times 10^5`$ vectors, PDL runs `rotq` on one thread.
+  Lowering the threshold (`PDL::set_autopthread_size`) makes it
+  1.6–1.9× faster, but setting it to 0 makes small calls 4–30× slower.
+  Like the malloc setting in [C4](#c4), this is a setting for the
+  application, not something the module should change.
+
 ## Caveats and open questions
 
 - These results come from a single machine: a laptop CPU inside a
@@ -1506,6 +1712,10 @@ layout effect (confirmed).**
   should carry over to Linux/glibc. Other platforms (macOS, musl,
   Windows) have different allocators.
 - Only `double` was benchmarked.
+- BLAS results depend on the library and its build. Only OpenBLAS
+  0.3.26 (pthreads) was measured. Reference BLAS, MKL, BLIS or another
+  OpenBLAS build could differ, especially in how they thread small
+  products.
 - The column-layout runs used only the one-quaternion case. Quaternions
   supplied as four columns, `(N)` each, were not measured. They would
   need a `q0(); q1(); q2(); q3()` signature variant.

@@ -1,0 +1,12 @@
+step                                               ns
+empty loop                                         25
+call an empty Perl sub with 3 args                321
+reftype + blessed on an array ref                 183
+records/single test (ref $x->[0])                 115
+refaddr($out) == refaddr($in)                     141
+hash slice @{$h}{qw(x y z)}                       300
+blessed + ->isa("PDL") on an ndarray              377
+$out->isnull                                      188
+$out->type == PDL::double()                      1937
+$out->get_datatype == $D (integer)                300
+PDL->pdl([4 numbers])                            5394

@@ -1,0 +1,16 @@
+perl 5.42.3, PDL 2.106
+
+case (ns per call)                    direct  Perl disp    XS disp |  Perl ovh    XS ovh
+single, new                              493       2732        677 |      2239       183
+single, into                             379       2170        515 |      1791       136
+single, in place                         388       2558        498 |      2171       110
+records N=10, new                       3091       4748       2426 |      1657      -666
+records N=10, into                      1212       3733       1602 |      2522       390
+columns N=10, into                      1134       6495       1765 |      5361       631
+records N=1000, new                   220616     273686     208628 |     53069    -11988
+records N=1000, into                   74446      87063     107739 |     12617     33293
+columns N=1000, into                   55019      71031      80978 |     16012     25959
+ndarray N=1, into (q Perl)              1119       9854       9904 |      8736      8786
+ndarray N=1, into (q ndarray)           1096       4611       5629 |      3515      4533
+ndarray N=1000, into (q Perl)           7753      19064      19233 |     11310     11480
+ndarray N=1000, into (q ndarray)        7672      11083      12191 |      3412      4519

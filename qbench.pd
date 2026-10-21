@@ -291,4 +291,156 @@ xs_rot_cols_into(q, cx, cy, cz, rx, ry, rz)
     }
 EOXS
 
+# ---------------------------------------------------------------------------
+# Prototype of the API's argument dispatch, in XS (see dispatch.pl).
+# xsd_rotate_vec( $q, $v, [$out] ) works out the data form of $v (single
+# [x,y,z], records, or { x, y, z } columns), the output mode (allocate,
+# into $out, in place), checks shapes, and runs the matching loop.  Blessed
+# arguments (ndarrays, objects) are handed to the Perl dispatcher,
+# QDispatch::rotate_vec.  Prototype limits: $q must be a single [x,y,z,w].
+pp_addhdr(<<'EOH');
+enum { QB_BAD, QB_OBJECT, QB_SINGLE, QB_RECORDS, QB_COLUMNS };
+
+/* data form of an argument, looking only at the top level and first element */
+static inline int
+qb_form(pTHX_ SV *sv)
+{
+    SV *rv;
+    if (!SvROK(sv)) return QB_BAD;
+    rv = SvRV(sv);
+    if (SvOBJECT(rv)) return QB_OBJECT;
+    if (SvTYPE(rv) == SVt_PVAV) {
+        SV **e;
+        if (av_count((AV *)rv) == 0) return QB_RECORDS;      /* empty batch */
+        e = av_fetch((AV *)rv, 0, 0);
+        return (e && SvROK(*e)) ? QB_RECORDS : QB_SINGLE;
+    }
+    if (SvTYPE(rv) == SVt_PVHV) return QB_COLUMNS;
+    return QB_BAD;
+}
+
+/* the array stored under key in a columns hash; created if create is set */
+static inline AV *
+qb_col(pTHX_ HV *hv, const char *key, I32 klen, int create)
+{
+    SV **e = hv_fetch(hv, key, klen, create);
+    if (!e) croak("columns hash has no '%s' key", key);
+    if (SvROK(*e) && SvTYPE(SvRV(*e)) == SVt_PVAV) return (AV *)SvRV(*e);
+    if (!create || SvOK(*e)) croak("column '%s' must be an array reference", key);
+    {
+        AV *av = newAV();
+        sv_setsv(*e, sv_2mortal(newRV_noinc((SV *)av)));
+        return av;
+    }
+}
+EOH
+
+pp_add_exported('', 'xsd_rotate_vec');
+pp_addxs(<<'EOXS');
+SV *
+xsd_rotate_vec(q, v, out = &PL_sv_undef)
+    SV *q
+    SV *v
+    SV *out
+  CODE:
+    double qa[4];
+    int fv = qb_form(aTHX_ v), fq = qb_form(aTHX_ q);
+    int have_out = SvOK(out);
+    if (fv == QB_OBJECT || fq == QB_OBJECT
+        || (have_out && SvROK(out) && SvOBJECT(SvRV(out)))) {
+        /* ndarrays and objects: hand over to the Perl dispatcher */
+        dSP;
+        int count;
+        ENTER; SAVETMPS;
+        PUSHMARK(SP);
+        XPUSHs(q); XPUSHs(v); if (have_out) XPUSHs(out);
+        PUTBACK;
+        count = call_pv("QDispatch::rotate_vec", G_SCALAR);
+        SPAGAIN;
+        if (count != 1) croak("QDispatch::rotate_vec returned %d values", count);
+        RETVAL = newSVsv(POPs);
+        PUTBACK;
+        FREETMPS; LEAVE;
+    }
+    else {
+        if (fq != QB_SINGLE) croak("prototype: q must be a single [x, y, z, w]");
+        qb_get(aTHX_ q, qa, 4, "q");
+        if (have_out && !(SvROK(out)
+                          && SvTYPE(SvRV(out)) == (fv == QB_COLUMNS ? SVt_PVHV : SVt_PVAV)))
+            croak("output must be %s, like the vectors",
+                  fv == QB_COLUMNS ? "a hash reference" : "an array reference");
+        switch (fv) {
+        case QB_SINGLE: {
+            double va[3], ra[3];
+            AV *o;
+            qb_get(aTHX_ v, va, 3, "v");
+            qrot_vec(qa, va, ra);
+            if (!have_out) { RETVAL = qb_vec3(aTHX_ ra); break; }
+            o = (AV *)SvRV(out);
+            av_extend(o, 2);
+            qb_set(aTHX_ o, 0, ra[0]); qb_set(aTHX_ o, 1, ra[1]); qb_set(aTHX_ o, 2, ra[2]);
+            av_fill(o, 2);
+            RETVAL = SvREFCNT_inc(out);
+            break;
+        }
+        case QB_RECORDS: {
+            AV *in = (AV *)SvRV(v), *o;
+            SSize_t i, n = av_count(in);
+            o = have_out ? (AV *)SvRV(out) : newAV();
+            if (n) av_extend(o, n - 1);
+            for (i = 0; i < n; i++) {
+                double va[3], ra[3];
+                SV **e = av_fetch(in, i, 0);
+                if (!e) croak("vector %ld is undefined", (long)i);
+                qb_get(aTHX_ *e, va, 3, "vector");
+                qrot_vec(qa, va, ra);
+                if (have_out) {
+                    AV *rv = qb_vec3_slot(aTHX_ o, i);
+                    qb_set(aTHX_ rv, 0, ra[0]); qb_set(aTHX_ rv, 1, ra[1]); qb_set(aTHX_ rv, 2, ra[2]);
+                    av_fill(rv, 2);
+                }
+                else
+                    av_store(o, i, qb_vec3(aTHX_ ra));
+            }
+            if (have_out) { av_fill(o, n - 1); RETVAL = SvREFCNT_inc(out); }
+            else RETVAL = newRV_noinc((SV *)o);
+            break;
+        }
+        case QB_COLUMNS: {
+            HV *hin = (HV *)SvRV(v), *hout;
+            AV *ax = qb_col(aTHX_ hin, "x", 1, 0), *ay = qb_col(aTHX_ hin, "y", 1, 0),
+               *az = qb_col(aTHX_ hin, "z", 1, 0), *ox, *oy, *oz;
+            SSize_t i, n = av_count(ax);
+            if (av_count(ay) != (Size_t)n || av_count(az) != (Size_t)n)
+                croak("x, y and z must have the same length");
+            hout = have_out ? (HV *)SvRV(out) : newHV();
+            ox = qb_col(aTHX_ hout, "x", 1, 1); oy = qb_col(aTHX_ hout, "y", 1, 1);
+            oz = qb_col(aTHX_ hout, "z", 1, 1);
+            if (n) { av_extend(ox, n - 1); av_extend(oy, n - 1); av_extend(oz, n - 1); }
+            for (i = 0; i < n; i++) {
+                SV **ex = av_fetch(ax, i, 0), **ey = av_fetch(ay, i, 0), **ez = av_fetch(az, i, 0);
+                double va[3], ra[3];
+                va[0] = ex ? SvNV(*ex) : 0; va[1] = ey ? SvNV(*ey) : 0; va[2] = ez ? SvNV(*ez) : 0;
+                qrot_vec(qa, va, ra);
+                if (have_out) {
+                    qb_set(aTHX_ ox, i, ra[0]); qb_set(aTHX_ oy, i, ra[1]); qb_set(aTHX_ oz, i, ra[2]);
+                }
+                else {
+                    av_store(ox, i, newSVnv(ra[0])); av_store(oy, i, newSVnv(ra[1]));
+                    av_store(oz, i, newSVnv(ra[2]));
+                }
+            }
+            if (have_out) { av_fill(ox, n - 1); av_fill(oy, n - 1); av_fill(oz, n - 1);
+                            RETVAL = SvREFCNT_inc(out); }
+            else RETVAL = newRV_noinc((SV *)hout);
+            break;
+        }
+        default:
+            croak("v is not a recognised data form");
+        }
+    }
+  OUTPUT:
+    RETVAL
+EOXS
+
 pp_done();

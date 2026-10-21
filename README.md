@@ -333,39 +333,39 @@ run, so compare ratios rather than absolute numbers.
 
 |     N | rotq(PP) | rotm(PP) | matmult | t_linear | PDL ops |
 |------:|---------:|---------:|--------:|---------:|--------:|
-|     1 |   1633.7 |   1615.3 |  6220.0 |  27285.8 | 24136.8 |
-|  1e2  |     23.7 |     29.5 |    85.4 |    423.9 |   297.2 |
-|  1e3  |      7.7 |     12.3 |    25.2 |    128.6 |    51.5 |
-|  1e4  |      6.2 |     10.6 |    19.0 |    119.9 |    70.2 |
-|  1e5  |      6.2 |     10.5 |    18.2 |    150.2 |    77.6 |
-|  1e6  |      4.6 |      5.1 |    18.5 |    153.4 |    75.9 |
-|  1e7  |     16.2 |     17.1 |    29.1 |    154.0 |   105.8 |
+| 1 | 1633.7 ns | 1615.3 ns | 6220.0 ns | 27285.8 ns | 24136.8 ns |
+| 1e2 | 23.7 ns | 29.5 ns | 85.4 ns | 423.9 ns | 297.2 ns |
+| 1e3 | 7.7 ns | 12.3 ns | 25.2 ns | 128.6 ns | 51.5 ns |
+| 1e4 | 6.2 ns | 10.6 ns | 19.0 ns | 119.9 ns | 70.2 ns |
+| 1e5 | 6.2 ns | 10.5 ns | 18.2 ns | 150.2 ns | 77.6 ns |
+| 1e6 | 4.6 ns | 5.1 ns | 18.5 ns | 153.4 ns | 75.9 ns |
+| 1e7 | 16.2 ns | 17.1 ns | 29.1 ns | 154.0 ns | 105.8 ns |
 
 ### N quaternions, N vectors (one each)
 
 |     N | rotq(PP) | PDL ops |
 |------:|---------:|--------:|
-|  1e3  |      7.8 |    52.6 |
-|  1e5  |      6.8 |    31.6 |
-|  1e7  |     20.5 |   118.8 |
+| 1e3 | 7.8 ns | 52.6 ns |
+| 1e5 | 6.8 ns | 31.6 ns |
+| 1e7 | 20.5 ns | 118.8 ns |
 
 ### Allocation and threading ([alloc.pl](alloc.pl))
 
 |     N | new out | prealloc | 1 thread, prealloc |
 |------:|--------:|---------:|-------------------:|
-|  1e5  |     6.2 |      6.1 |                6.1 |
-|  1e6  |     5.3 |      3.8 |                6.6 |
-|  3e6  |    17.7 |      4.0 |                7.5 |
-|  1e7  |    22.9 |      4.2 |                7.9 |
-|  3e7  |    22.6 |      3.8 |                7.0 |
+| 1e5 | 6.2 ns | 6.1 ns | 6.1 ns |
+| 1e6 | 5.3 ns | 3.8 ns | 6.6 ns |
+| 3e6 | 17.7 ns | 4.0 ns | 7.5 ns |
+| 1e7 | 22.9 ns | 4.2 ns | 7.9 ns |
+| 3e7 | 22.6 ns | 3.8 ns | 7.0 ns |
 
 ### glibc mmap threshold ([mmap.pl](mmap.pl), `new out` only)
 
 |     N | output size | default glibc | mmap/trim threshold raised |
 |------:|------------:|--------------:|---------------------------:|
-|  1e6  |       24 MB |           5.7 |                        7.5 |
-|  3e6  |       72 MB |          20.8 |                        6.4 |
-|  1e7  |      240 MB |          28.2 |                        6.1 |
+| 1e6 | 24 MB | 5.7 ns | 7.5 ns |
+| 3e6 | 72 MB | 20.8 ns | 6.4 ns |
+| 1e7 | 240 MB | 28.2 ns | 6.1 ns |
 
 ### Page faults per call ([faults.pl](faults.pl))
 
@@ -373,9 +373,9 @@ The "pages in output" column is $`3 \cdot 8 \cdot N / 4096`$.
 
 |     N | new out, default | new out, threshold raised | pages in output | prealloc |
 |------:|-----------------:|--------------------------:|----------------:|---------:|
-|  1e6  |                8 |                         8 |            5859 |        8 |
-|  3e6  |           17 587 |                         8 |          17 578 |        8 |
-|  1e7  |           58 602 |                         8 |          58 594 |        8 |
+| 1e6 | 8 faults | 8 faults | 5859 pages | 8 faults |
+| 3e6 | 17 587 faults | 8 faults | 17 578 pages | 8 faults |
+| 1e7 | 58 602 faults | 8 faults | 58 594 pages | 8 faults |
 
 ## Analysis
 
@@ -577,40 +577,40 @@ measured 4.2 ns at $`10^6`$ and 16.8 ns at $`10^7`$, against 4.6 and
 **(1) Building `(3, N)` from three columns**, default malloc (and with
 the mmap threshold raised):
 
-|     N | cat+xchg+copy |        glue | fill prealloc |
+|     N | cat+xchg+copy | glue | fill prealloc |
 |------:|--------------:|------------:|--------------:|
-|  1e2  |  278.7 (267.4) | 338.2 (317.6) |  138.3 (141.0) |
-|  1e3  |   62.9  (60.9) |  41.7  (43.2) |   16.9  (18.2) |
-|  1e4  |   60.9  (42.5) |  27.5  (12.1) |    4.4   (4.4) |
-|  1e5  |   67.1  (37.7) |   9.1   (9.0) |    3.1   (3.0) |
-|  1e6  |   69.9  (43.0) |   9.4   (9.6) |    6.3   (6.1) |
-|  1e7  |   72.0  (37.5) |  30.0   (6.8) |    7.1   (7.1) |
+| 1e2 | 278.7 ns (267.4 ns) | 338.2 ns (317.6 ns) | 138.3 ns (141.0 ns) |
+| 1e3 | 62.9 ns (60.9 ns) | 41.7 ns (43.2 ns) | 16.9 ns (18.2 ns) |
+| 1e4 | 60.9 ns (42.5 ns) | 27.5 ns (12.1 ns) | 4.4 ns (4.4 ns) |
+| 1e5 | 67.1 ns (37.7 ns) | 9.1 ns (9.0 ns) | 3.1 ns (3.0 ns) |
+| 1e6 | 69.9 ns (43.0 ns) | 9.4 ns (9.6 ns) | 6.3 ns (6.1 ns) |
+| 1e7 | 72.0 ns (37.5 ns) | 30.0 ns (6.8 ns) | 7.1 ns (7.1 ns) |
 
 For comparison, `rotq` on data that is already `(3, N)` costs 4–7 ns
 per vector for $`N \ge 10^4`$.
 
 **(2) Rotating, default malloc:**
 
-|     N | rotq(3,N) | rotq(N,3)^T | cat+xchg | cat+xchg+copy |  glue | fill prealloc | rotq3 | rotq3 prealloc |
+|     N | rotq(3,N) | rotq(N,3)^T | cat+xchg | cat+xchg+copy | glue | fill prealloc | rotq3 | rotq3 prealloc |
 |------:|----------:|------------:|---------:|--------------:|------:|--------------:|------:|---------------:|
-|  1e2  |      27.9 |        40.4 |    232.1 |         300.4 | 349.6 |         161.9 |  47.1 |           23.6 |
-|  1e3  |       8.5 |         9.8 |     31.2 |          70.9 |  51.8 |          25.8 |  11.4 |            7.8 |
-|  1e4  |       6.3 |         6.6 |     11.5 |          47.2 |  17.8 |          10.6 |   7.3 |            6.3 |
-|  1e5  |       6.8 |         6.1 |     10.3 |          49.4 |  16.7 |           9.1 |   7.1 |            6.1 |
-|  1e6  |       4.2 |         4.4 |     37.6 |          83.6 |  49.4 |          10.1 |   7.7 |            6.3 |
-|  1e7  |      16.8 |        17.4 |     34.2 |          82.6 |  49.6 |          10.6 |  19.4 |            3.7 |
+| 1e2 | 27.9 ns | 40.4 ns | 232.1 ns | 300.4 ns | 349.6 ns | 161.9 ns | 47.1 ns | 23.6 ns |
+| 1e3 | 8.5 ns | 9.8 ns | 31.2 ns | 70.9 ns | 51.8 ns | 25.8 ns | 11.4 ns | 7.8 ns |
+| 1e4 | 6.3 ns | 6.6 ns | 11.5 ns | 47.2 ns | 17.8 ns | 10.6 ns | 7.3 ns | 6.3 ns |
+| 1e5 | 6.8 ns | 6.1 ns | 10.3 ns | 49.4 ns | 16.7 ns | 9.1 ns | 7.1 ns | 6.1 ns |
+| 1e6 | 4.2 ns | 4.4 ns | 37.6 ns | 83.6 ns | 49.4 ns | 10.1 ns | 7.7 ns | 6.3 ns |
+| 1e7 | 16.8 ns | 17.4 ns | 34.2 ns | 82.6 ns | 49.6 ns | 10.6 ns | 19.4 ns | 3.7 ns |
 
 **(2') Rotating, mmap threshold raised** (allocation page faults
 removed):
 
-|     N | rotq(3,N) | rotq(N,3)^T | cat+xchg | cat+xchg+copy |  glue | fill prealloc | rotq3 | rotq3 prealloc |
+|     N | rotq(3,N) | rotq(N,3)^T | cat+xchg | cat+xchg+copy | glue | fill prealloc | rotq3 | rotq3 prealloc |
 |------:|----------:|------------:|---------:|--------------:|------:|--------------:|------:|---------------:|
-|  1e2  |      25.4 |        37.6 |    215.6 |         281.6 | 326.7 |         154.2 |  43.8 |           21.6 |
-|  1e3  |       7.6 |         8.9 |     28.6 |          65.8 |  45.2 |          22.7 |  10.2 |            7.3 |
-|  1e4  |       5.8 |         6.0 |     11.9 |          50.6 |  20.1 |          10.8 |   7.6 |            6.9 |
-|  1e5  |       6.5 |         6.1 |      9.4 |          45.3 |  16.2 |           9.6 |   7.1 |            6.1 |
-|  1e6  |       5.2 |         4.9 |     10.1 |          49.4 |  14.7 |           9.5 |   7.6 |            6.6 |
-|  1e7  |       4.6 |         4.5 |      9.1 |          47.6 |  12.3 |          10.5 |   4.8 |            3.7 |
+| 1e2 | 25.4 ns | 37.6 ns | 215.6 ns | 281.6 ns | 326.7 ns | 154.2 ns | 43.8 ns | 21.6 ns |
+| 1e3 | 7.6 ns | 8.9 ns | 28.6 ns | 65.8 ns | 45.2 ns | 22.7 ns | 10.2 ns | 7.3 ns |
+| 1e4 | 5.8 ns | 6.0 ns | 11.9 ns | 50.6 ns | 20.1 ns | 10.8 ns | 7.6 ns | 6.9 ns |
+| 1e5 | 6.5 ns | 6.1 ns | 9.4 ns | 45.3 ns | 16.2 ns | 9.6 ns | 7.1 ns | 6.1 ns |
+| 1e6 | 5.2 ns | 4.9 ns | 10.1 ns | 49.4 ns | 14.7 ns | 9.5 ns | 7.6 ns | 6.6 ns |
+| 1e7 | 4.6 ns | 4.5 ns | 9.1 ns | 47.6 ns | 12.3 ns | 10.5 ns | 4.8 ns | 3.7 ns |
 
 ### Analysis
 
@@ -740,34 +740,34 @@ way. Those outputs were allocated once, outside the timed loop.)
 per call. Each cell gives default malloc, then the raised mmap
 threshold in parentheses:
 
-|     N | zeroes      | nfs         | faults, zeroes | faults, nfs |
+|     N | zeroes | nfs | faults, zeroes | faults, nfs |
 |------:|------------:|------------:|---------------:|------------:|
-|  1e3  |  2.2  (2.4) |  2.4  (2.7) |       0  (0)   |     0  (0)  |
-|  1e5  |  0.6  (0.6) |  0.6  (0.6) |       0  (0)   |     0  (0)  |
-|  1e6  |  1.1  (1.1) |  1.1  (1.1) |       0  (0)   |     0  (0)  |
-|  3e6  | 15.2  (1.1) | 14.9  (1.1) |  17 579  (0)   | 17 579  (0) |
-|  1e7  | 15.6  (1.1) | 15.5  (1.1) |  58 594  (0)   | 58 594  (0) |
+| 1e3 | 2.2 ns (2.4 ns) | 2.4 ns (2.7 ns) | 0 faults (0 faults) | 0 faults (0 faults) |
+| 1e5 | 0.6 ns (0.6 ns) | 0.6 ns (0.6 ns) | 0 faults (0 faults) | 0 faults (0 faults) |
+| 1e6 | 1.1 ns (1.1 ns) | 1.1 ns (1.1 ns) | 0 faults (0 faults) | 0 faults (0 faults) |
+| 3e6 | 15.2 ns (1.1 ns) | 14.9 ns (1.1 ns) | 17 579 faults (0 faults) | 17 579 faults (0 faults) |
+| 1e7 | 15.6 ns (1.1 ns) | 15.5 ns (1.1 ns) | 58 594 faults (0 faults) | 58 594 faults (0 faults) |
 
 **Rotating with a freshly allocated output on every call**, default
 malloc:
 
 |     N | rotq | rotq zeroes | rotq nfs | rotq pre | rotq3 | rotq3 zeroes | rotq3 nfs | rotq3 pre |
 |------:|-----:|------------:|---------:|---------:|------:|-------------:|----------:|----------:|
-|  1e3  |  8.6 |        10.0 |     10.4 |      7.4 |  11.4 |         13.7 |      14.5 |       8.2 |
-|  1e5  |  6.4 |         6.5 |      6.4 |      5.8 |   7.1 |          6.8 |       7.0 |       6.6 |
-|  1e6  |  5.1 |         5.2 |      5.2 |      3.8 |   8.0 |          8.2 |       8.1 |       6.7 |
-|  3e6  | 18.8 |        19.4 |     18.9 |      3.8 |  15.1 |         14.7 |      14.9 |       3.8 |
-|  1e7  | 19.6 |        19.6 |     19.4 |      3.6 |  20.7 |         19.3 |      19.5 |       3.8 |
+| 1e3 | 8.6 ns | 10.0 ns | 10.4 ns | 7.4 ns | 11.4 ns | 13.7 ns | 14.5 ns | 8.2 ns |
+| 1e5 | 6.4 ns | 6.5 ns | 6.4 ns | 5.8 ns | 7.1 ns | 6.8 ns | 7.0 ns | 6.6 ns |
+| 1e6 | 5.1 ns | 5.2 ns | 5.2 ns | 3.8 ns | 8.0 ns | 8.2 ns | 8.1 ns | 6.7 ns |
+| 3e6 | 18.8 ns | 19.4 ns | 18.9 ns | 3.8 ns | 15.1 ns | 14.7 ns | 14.9 ns | 3.8 ns |
+| 1e7 | 19.6 ns | 19.6 ns | 19.4 ns | 3.6 ns | 20.7 ns | 19.3 ns | 19.5 ns | 3.8 ns |
 
 **The same, mmap threshold raised:**
 
 |     N | rotq | rotq zeroes | rotq nfs | rotq pre | rotq3 | rotq3 zeroes | rotq3 nfs | rotq3 pre |
 |------:|-----:|------------:|---------:|---------:|------:|-------------:|----------:|----------:|
-|  1e3  |  8.9 |         9.7 |      9.7 |      7.0 |  11.2 |         14.0 |      14.3 |       8.0 |
-|  1e5  |  6.5 |         6.5 |      6.5 |      6.3 |   7.2 |          6.9 |       7.0 |       6.5 |
-|  1e6  |  5.2 |         5.3 |      5.3 |      3.9 |   7.8 |          8.0 |       8.1 |       7.0 |
-|  3e6  |  4.9 |         5.0 |      4.9 |      3.6 |   5.4 |          5.3 |       5.4 |       3.9 |
-|  1e7  |  4.9 |         4.8 |      4.9 |      3.5 |   5.2 |          5.2 |       5.1 |       3.7 |
+| 1e3 | 8.9 ns | 9.7 ns | 9.7 ns | 7.0 ns | 11.2 ns | 14.0 ns | 14.3 ns | 8.0 ns |
+| 1e5 | 6.5 ns | 6.5 ns | 6.5 ns | 6.3 ns | 7.2 ns | 6.9 ns | 7.0 ns | 6.5 ns |
+| 1e6 | 5.2 ns | 5.3 ns | 5.3 ns | 3.9 ns | 7.8 ns | 8.0 ns | 8.1 ns | 7.0 ns |
+| 3e6 | 4.9 ns | 5.0 ns | 4.9 ns | 3.6 ns | 5.4 ns | 5.3 ns | 5.4 ns | 3.9 ns |
+| 1e7 | 4.9 ns | 4.8 ns | 4.9 ns | 3.5 ns | 5.2 ns | 5.2 ns | 5.1 ns | 3.7 ns |
 
 ### Analysis
 
@@ -849,17 +849,17 @@ I (Claude) measured this per call with [ovh.pl](ovh.pl) and
 Results are the per-cell minimum of 3 runs,
 [results/ovh-min.txt](results/ovh-min.txt):
 
-| Operation (ns per call, includes destroying the result)  |  N = 1 | N = 1000 |
+| Operation (includes destroying the result) | N = 1 | N = 1000 |
 |-----------------------------------------------------------|-------:|---------:|
-| `zeroes(3,N)` (Core.pm wrapper)                            |   1255 |     1998 |
-| `PDL->zeroes(3,N)` (XS directly)                           |   1168 |     1871 |
-| `PDL->new_from_specification(double,3,N)`, no data         |   1043 |     1042 |
-| … then `->make_physical`                                   |   1158 |     1865 |
-| `PDL->null`                                                | ≈ 850 |        – |
-| `rotq($q,$v)`, kernel creates output                       |   1580 |     7864 |
-| `rotq($q,$v,$r)`, output reused                            |   1136 |     6490 |
-| `rotq($q,$v,zeroes(3,N))`                                  |   2413 |     9073 |
-| `rotq($q,$v,PDL->new_from_specification(double,3,N))`      |   2169 |     8895 |
+| `zeroes(3,N)` (Core.pm wrapper) | 1255 ns | 1998 ns |
+| `PDL->zeroes(3,N)` (XS directly) | 1168 ns | 1871 ns |
+| `PDL->new_from_specification(double,3,N)`, no data | 1043 ns | 1042 ns |
+| … then `->make_physical` | 1158 ns | 1865 ns |
+| `PDL->null` | ≈ 850 ns | – |
+| `rotq($q,$v)`, kernel creates output | 1580 ns | 7864 ns |
+| `rotq($q,$v,$r)`, output reused | 1136 ns | 6490 ns |
+| `rotq($q,$v,zeroes(3,N))` | 2413 ns | 9073 ns |
+| `rotq($q,$v,PDL->new_from_specification(double,3,N))` | 2169 ns | 8895 ns |
 
 - **The fixed cost of `rotq` itself is about 1.1 µs.** That is the
   "output reused" case. It covers creating the trans, sizing dims and
@@ -992,46 +992,46 @@ All figures are ns per vector.
 
 **(1) Pure Perl:**
 
-|     N | rot1 map |  aoa | aoa mat | cols | cols mat |
+|     N | rot1 map | aoa | aoa mat | cols | cols mat |
 |------:|---------:|-----:|--------:|-----:|---------:|
-|     1 |     1404 | 1371 |    2203 | 1737 |     2420 |
-|     3 |     1119 |  948 |    1114 | 1199 |     1132 |
-|    10 |     1071 |  807 |     658 |  924 |      736 |
-|    30 |     1061 |  774 |     545 |  863 |      634 |
-|  1e2  |     1135 |  803 |     520 |  815 |      512 |
-|  1e3  |     1074 |  744 |     506 |  762 |      486 |
-|  1e4  |     1077 |  746 |     499 |  748 |      469 |
-|  1e5  |     1095 |  770 |     525 |  860 |      624 |
-|  1e6  |     1119 |  819 |     569 |  798 |      691 |
+| 1 | 1404 ns | 1371 ns | 2203 ns | 1737 ns | 2420 ns |
+| 3 | 1119 ns | 948 ns | 1114 ns | 1199 ns | 1132 ns |
+| 10 | 1071 ns | 807 ns | 658 ns | 924 ns | 736 ns |
+| 30 | 1061 ns | 774 ns | 545 ns | 863 ns | 634 ns |
+| 1e2 | 1135 ns | 803 ns | 520 ns | 815 ns | 512 ns |
+| 1e3 | 1074 ns | 744 ns | 506 ns | 762 ns | 486 ns |
+| 1e4 | 1077 ns | 746 ns | 499 ns | 748 ns | 469 ns |
+| 1e5 | 1095 ns | 770 ns | 525 ns | 860 ns | 624 ns |
+| 1e6 | 1119 ns | 819 ns | 569 ns | 798 ns | 691 ns |
 
 **(2) PDL with data already in ndarrays, and the round trip from Perl
 data:**
 
 |     N | rotq | rotq3 | AoA->rotq | cols->rotq3 |
 |------:|-----:|------:|----------:|------------:|
-|     1 | 1789 |  3472 |      7873 |       16689 |
-|     3 |  613 |  1129 |      3489 |        5495 |
-|    10 |  199 |   386 |      2011 |        2060 |
-|    30 |   69 |   136 |      1564 |         908 |
-|  1e2  |   25 |    45 |      1427 |         510 |
-|  1e3  |    8 |    10 |      1383 |         346 |
-|  1e4  |    6 |     7 |      1483 |         350 |
-|  1e5  |    6 |     6 |      1721 |         620 |
-|  1e6  |    5 |     8 |      1881 |        1106 |
+| 1 | 1789 ns | 3472 ns | 7873 ns | 16689 ns |
+| 3 | 613 ns | 1129 ns | 3489 ns | 5495 ns |
+| 10 | 199 ns | 386 ns | 2011 ns | 2060 ns |
+| 30 | 69 ns | 136 ns | 1564 ns | 908 ns |
+| 1e2 | 25 ns | 45 ns | 1427 ns | 510 ns |
+| 1e3 | 8 ns | 10 ns | 1383 ns | 346 ns |
+| 1e4 | 6 ns | 7 ns | 1483 ns | 350 ns |
+| 1e5 | 6 ns | 6 ns | 1721 ns | 620 ns |
+| 1e6 | 5 ns | 8 ns | 1881 ns | 1106 ns |
 
 **(3) The conversions alone:**
 
 |     N | pdl(AoA) | unpdl | pdl(cols) | cols list |
 |------:|---------:|------:|----------:|----------:|
-|     1 |     4665 |   561 |      8724 |      2671 |
-|     3 |     2386 |   306 |      3079 |      1009 |
-|    10 |     1530 |   222 |      1030 |       455 |
-|    30 |     1213 |   197 |       446 |       293 |
-|  1e2  |     1131 |   190 |       218 |       231 |
-|  1e3  |     1127 |   228 |       123 |       207 |
-|  1e4  |     1176 |   248 |       116 |       233 |
-|  1e5  |     1268 |   422 |       113 |       443 |
-|  1e6  |     1431 |   589 |       121 |      1016 |
+| 1 | 4665 ns | 561 ns | 8724 ns | 2671 ns |
+| 3 | 2386 ns | 306 ns | 3079 ns | 1009 ns |
+| 10 | 1530 ns | 222 ns | 1030 ns | 455 ns |
+| 30 | 1213 ns | 197 ns | 446 ns | 293 ns |
+| 1e2 | 1131 ns | 190 ns | 218 ns | 231 ns |
+| 1e3 | 1127 ns | 228 ns | 123 ns | 207 ns |
+| 1e4 | 1176 ns | 248 ns | 116 ns | 233 ns |
+| 1e5 | 1268 ns | 422 ns | 113 ns | 443 ns |
+| 1e6 | 1431 ns | 589 ns | 121 ns | 1016 ns |
 
 ### Analysis
 
@@ -1204,39 +1204,39 @@ Same protocol as before: ≥ 0.5 s per cell, 3 runs, per-cell minimum.
 
 **(1) One vector per call**, ns per call:
 
-| Call | ns |
+| Call | Time |
 |------|---:|
-| empty loop (baseline) | 14 |
-| Perl `rot1(\@q, \@v)` → `[..]` | 979 |
-| XS `xs_rot1(\@q, \@v)` → `[..]` | 288 |
-| Perl `rot1_list(@q, @v)` → list | 877 |
-| XS `xs_rot1_list(@q, @v)` → list | 178 |
-| PDL `rotq($q, $v)`, ndarrays | 1487 |
-| PDL `rotq($q, $v, $r)`, preallocated | 948 |
+| empty loop (baseline) | 14 ns |
+| Perl `rot1(\@q, \@v)` → `[..]` | 979 ns |
+| XS `xs_rot1(\@q, \@v)` → `[..]` | 288 ns |
+| Perl `rot1_list(@q, @v)` → list | 877 ns |
+| XS `xs_rot1_list(@q, @v)` → list | 178 ns |
+| PDL `rotq($q, $v)`, ndarrays | 1487 ns |
+| PDL `rotq($q, $v, $r)`, preallocated | 948 ns |
 
 **(2) $`N`$ vectors per call**, ns per vector. "Perl" is the
 quaternion form and "Perl mat" the matrix form ([C15](#c15)):
 
 |     N | Perl aoa | Perl mat | XS aoa | Perl cols | Perl mat | XS cols | PDL rotq (ndarrays) |
 |------:|---------:|---------:|-------:|----------:|---------:|--------:|--------------------:|
-|     1 |     1431 |     2277 |    485 |      1818 |     2560 |     612 |              1706.8 |
-|     3 |     1011 |     1075 |    246 |      1151 |     1178 |     263 |               689.5 |
-|    10 |      951 |      756 |    186 |      1037 |      815 |     129 |               215.4 |
-|    30 |      913 |      650 |    168 |       956 |      677 |      84 |                70.1 |
-|  1e2  |      863 |      552 |    155 |       833 |      576 |      72 |                25.8 |
-|  1e3  |      814 |      557 |    168 |       773 |      488 |      64 |                 8.5 |
-|  1e4  |      828 |      526 |    168 |       757 |      488 |      69 |                 5.7 |
-|  1e5  |      770 |      503 |    182 |       780 |      633 |     204 |                 6.4 |
-|  1e6  |      786 |      521 |    209 |       773 |      674 |     340 |                 4.5 |
+| 1 | 1431 ns | 2277 ns | 485 ns | 1818 ns | 2560 ns | 612 ns | 1706.8 ns |
+| 3 | 1011 ns | 1075 ns | 246 ns | 1151 ns | 1178 ns | 263 ns | 689.5 ns |
+| 10 | 951 ns | 756 ns | 186 ns | 1037 ns | 815 ns | 129 ns | 215.4 ns |
+| 30 | 913 ns | 650 ns | 168 ns | 956 ns | 677 ns | 84 ns | 70.1 ns |
+| 1e2 | 863 ns | 552 ns | 155 ns | 833 ns | 576 ns | 72 ns | 25.8 ns |
+| 1e3 | 814 ns | 557 ns | 168 ns | 773 ns | 488 ns | 64 ns | 8.5 ns |
+| 1e4 | 828 ns | 526 ns | 168 ns | 757 ns | 488 ns | 69 ns | 5.7 ns |
+| 1e5 | 770 ns | 503 ns | 182 ns | 780 ns | 633 ns | 204 ns | 6.4 ns |
+| 1e6 | 786 ns | 521 ns | 209 ns | 773 ns | 674 ns | 340 ns | 4.5 ns |
 
 **(3) PP kernels**, ns per vector:
 
 |     N | rotq | rotq_shared | rotq, prealloc | rotq_shared, prealloc |
 |------:|-----:|------------:|---------------:|----------------------:|
-|  1e2  | 25.3 |        24.4 |           17.1 |                  16.7 |
-|  1e4  |  5.7 |         5.7 |            5.2 |                   5.2 |
-|  1e6  |  4.4 |         4.5 |            3.3 |                   3.6 |
-|  1e7  | 16.9 |        17.4 |            3.3 |                   3.3 |
+| 1e2 | 25.3 ns | 24.4 ns | 17.1 ns | 16.7 ns |
+| 1e4 | 5.7 ns | 5.7 ns | 5.2 ns | 5.2 ns |
+| 1e6 | 4.4 ns | 4.5 ns | 3.3 ns | 3.6 ns |
+| 1e7 | 16.9 ns | 17.4 ns | 3.3 ns | 3.3 ns |
 
 ### Analysis
 
@@ -1424,46 +1424,46 @@ It was run three times in each mode, alternating:
 
 **(1) One vector per call**, ns per call:
 
-| Call | ns |
+| Call | Time |
 |------|---:|
-| empty loop (baseline) | 15 |
-| Perl `rot1` → new | 1021 |
-| Perl `rot1_into` → into | 1015 |
-| XS `xs_rot1` → new | 291 |
-| XS `xs_rot1_into` → into | 187 |
-| XS `xs_rot1_list` → list | 176 |
+| empty loop (baseline) | 15 ns |
+| Perl `rot1` → new | 1021 ns |
+| Perl `rot1_into` → into | 1015 ns |
+| XS `xs_rot1` → new | 291 ns |
+| XS `xs_rot1_into` → into | 187 ns |
+| XS `xs_rot1_list` → list | 176 ns |
 
 **(2) Array of `[x,y,z]`**, ns per vector:
 
 |     N | Perl new | Perl into | XS new | XS into | XS in place |
 |------:|---------:|----------:|-------:|--------:|------------:|
-|     1 |     2157 |      2126 |    472 |     361 |         317 |
-|    10 |      726 |       642 |    178 |      91 |          89 |
-|  1e2  |      552 |       515 |    150 |      69 |          66 |
-|  1e3  |      560 |       509 |    174 |      68 |          67 |
-|  1e4  |      551 |       509 |    182 |      70 |          62 |
-|  1e5  |      553 |       474 |    194 |      82 |          67 |
-|  1e6  |      566 |       484 |    214 |      81 |          64 |
+| 1 | 2157 ns | 2126 ns | 472 ns | 361 ns | 317 ns |
+| 10 | 726 ns | 642 ns | 178 ns | 91 ns | 89 ns |
+| 1e2 | 552 ns | 515 ns | 150 ns | 69 ns | 66 ns |
+| 1e3 | 560 ns | 509 ns | 174 ns | 68 ns | 67 ns |
+| 1e4 | 551 ns | 509 ns | 182 ns | 70 ns | 62 ns |
+| 1e5 | 553 ns | 474 ns | 194 ns | 82 ns | 67 ns |
+| 1e6 | 566 ns | 484 ns | 214 ns | 81 ns | 64 ns |
 
 **(3) Three column arrays**, ns per vector:
 
 |     N | Perl new | Perl into | XS new | XS into | XS in place | PDL `rotq3`, prealloc |
 |------:|---------:|----------:|-------:|--------:|------------:|----------------------:|
-|     1 |     2469 |      2241 |    582 |     321 |         312 |                1598.0 |
-|    10 |      763 |       619 |    114 |      71 |          70 |                 163.9 |
-|  1e2  |      551 |       452 |     65 |      45 |          43 |                  21.7 |
-|  1e3  |      463 |       429 |     63 |      48 |          44 |                   7.3 |
-|  1e4  |      454 |       446 |     76 |      55 |          42 |                   5.9 |
-|  1e5  |      624 |       676 |    268 |     258 |          44 |                   5.8 |
-|  1e6  |      566 |       540 |    252 |     260 |          45 |                   6.7 |
+| 1 | 2469 ns | 2241 ns | 582 ns | 321 ns | 312 ns | 1598.0 ns |
+| 10 | 763 ns | 619 ns | 114 ns | 71 ns | 70 ns | 163.9 ns |
+| 1e2 | 551 ns | 452 ns | 65 ns | 45 ns | 43 ns | 21.7 ns |
+| 1e3 | 463 ns | 429 ns | 63 ns | 48 ns | 44 ns | 7.3 ns |
+| 1e4 | 454 ns | 446 ns | 76 ns | 55 ns | 42 ns | 5.9 ns |
+| 1e5 | 624 ns | 676 ns | 268 ns | 258 ns | 44 ns | 5.8 ns |
+| 1e6 | 566 ns | 540 ns | 252 ns | 260 ns | 45 ns | 6.7 ns |
 
 **(4) Scalar layout, $`N = 10^6`$ columns** ([svlayout.pl](svlayout.pl)),
 ns per vector, range over 3 fresh processes per mode:
 
 | Mode | XS into | XS in place | XS new |
 |------|--------:|------------:|-------:|
-| `clean` | 43–48 | 43–45 | 254–256 |
-| `churn` | 72–81 | 54–59 | 245–258 |
+| `clean` | 43–48 ns | 43–45 ns | 254–256 ns |
+| `churn` | 72–81 ns | 54–59 ns | 245–258 ns |
 
 ### Analysis
 
@@ -1620,32 +1620,32 @@ values differ only by noise:
 
 |     N | rotq | rotq pre | matmult | x (=mmult) | mmult | gemm pre |
 |------:|-----:|---------:|--------:|-----------:|------:|---------:|
-|     1 | 2150 (1607) | 1183 (1086) | 3375 (3303) | 4380 (4161) | 1893 (1680) | 4873 (4636) |
-|  1e2  | 26.6 (25.0) | 17.8 (16.0) | 56.8 (55.1) | 54.4 (53.5) | 28.7 (27.6) | 55.5 (50.6) |
-|  1e3  |  7.9 (7.7)  |  6.7 (6.4)  | 22.3 (21.4) | 10.8 (10.6) |  8.1 (7.7)  | 10.9 (10.2) |
-|  1e4  |  6.2 (6.1)  |  5.4 (5.5)  | 17.8 (17.9) |  6.6 (6.4)  |  6.4 (6.1)  |  6.1 (6.0)  |
-|  1e5  |  6.0 (6.0)  |  5.4 (5.4)  | 17.6 (18.4) |  4.9 (6.2)  |  4.8 (6.2)  |  2.8 (5.8)  |
-|  1e6  |  4.6 (4.5)  |  3.3 (3.3)  | 19.0 (19.1) |  8.8 (7.8)  | 10.3 (7.8)  |  7.0 (7.0)  |
-|  1e7  | 17.1 (16.9) |  3.3 (3.3)  | 32.0 (32.0) | 28.7 (21.4) | 29.3 (21.3) |  8.0 (7.1)  |
+| 1 | 2150 ns (1607 ns) | 1183 ns (1086 ns) | 3375 ns (3303 ns) | 4380 ns (4161 ns) | 1893 ns (1680 ns) | 4873 ns (4636 ns) |
+| 1e2 | 26.6 ns (25.0 ns) | 17.8 ns (16.0 ns) | 56.8 ns (55.1 ns) | 54.4 ns (53.5 ns) | 28.7 ns (27.6 ns) | 55.5 ns (50.6 ns) |
+| 1e3 | 7.9 ns (7.7 ns) | 6.7 ns (6.4 ns) | 22.3 ns (21.4 ns) | 10.8 ns (10.6 ns) | 8.1 ns (7.7 ns) | 10.9 ns (10.2 ns) |
+| 1e4 | 6.2 ns (6.1 ns) | 5.4 ns (5.5 ns) | 17.8 ns (17.9 ns) | 6.6 ns (6.4 ns) | 6.4 ns (6.1 ns) | 6.1 ns (6.0 ns) |
+| 1e5 | 6.0 ns (6.0 ns) | 5.4 ns (5.4 ns) | 17.6 ns (18.4 ns) | 4.9 ns (6.2 ns) | 4.8 ns (6.2 ns) | 2.8 ns (5.8 ns) |
+| 1e6 | 4.6 ns (4.5 ns) | 3.3 ns (3.3 ns) | 19.0 ns (19.1 ns) | 8.8 ns (7.8 ns) | 10.3 ns (7.8 ns) | 7.0 ns (7.0 ns) |
+| 1e7 | 17.1 ns (16.9 ns) | 3.3 ns (3.3 ns) | 32.0 ns (32.0 ns) | 28.7 ns (21.4 ns) | 29.3 ns (21.3 ns) | 8.0 ns (7.1 ns) |
 
 **(2) $`N`$ quaternions, one vector each**, ns per vector (OpenBLAS
 default threading, then one thread):
 
 |     N | rotq | mmult (mats pre) | build + mmult |
 |------:|-----:|-----------------:|--------------:|
-|  1e2  | 26.6 (25.1) | 272 (268) | 2233 (2235) |
-|  1e4  |  6.2 (6.2)  | 206 (196) |  408 (407)  |
-|  1e6  |  6.0 (6.0)  | 827 (740) | 1176 (1091) |
+| 1e2 | 26.6 ns (25.1 ns) | 272 ns (268 ns) | 2233 ns (2235 ns) |
+| 1e4 | 6.2 ns (6.2 ns) | 206 ns (196 ns) | 408 ns (407 ns) |
+| 1e6 | 6.0 ns (6.0 ns) | 827 ns (740 ns) | 1176 ns (1091 ns) |
 
 **(3) `rotq` with a preallocated output, PDL threading threshold**
 ([autopthread.pl](autopthread.pl)), ns per vector:
 
 |     N | default threshold (1 M elements) | threshold 0 |
 |------:|---------------------------------:|------------:|
-|  1e3  |  7.5 | 228.5 |
-|  1e4  |  6.0 |  25.8 |
-|  1e5  |  6.5 |   4.1 |
-|  3e5  |  6.5 |   3.5 |
+| 1e3 | 7.5 ns | 228.5 ns |
+| 1e4 | 6.0 ns | 25.8 ns |
+| 1e5 | 6.5 ns | 4.1 ns |
+| 3e5 | 6.5 ns | 3.5 ns |
 
 ### Analysis
 
@@ -1788,41 +1788,43 @@ minima are in [results/dispatch-min.txt](results/dispatch-min.txt) and
 
 ### Results
 
-**(1) Dispatch overhead on Perl data:**
+**(1) Perl data.** The first column is the time of the kernel called
+directly, with no dispatcher. The other two are the *extra* time each
+dispatcher adds to that:
 
-| Case | Direct kernel | Perl dispatch | XS dispatch |
+| Case | Kernel called directly | Added by Perl dispatch | Added by XS dispatch |
 |------|--------------:|--------------:|------------:|
-| single vector, new | 324 | +1124 | +12 |
-| single vector, into | 215 | +1276 | +58 |
-| single vector, in place | 227 | +1355 | +68 |
-| 10 records, new | 1624 | +1379 | +177 |
-| 10 records, into | 804 | +1460 | +153 |
-| 10 columns, into | 623 | +3626 | +469 |
+| single vector, new | 324 ns | +1124 ns | +12 ns |
+| single vector, into | 215 ns | +1276 ns | +58 ns |
+| single vector, in place | 227 ns | +1355 ns | +68 ns |
+| 10 records, new | 1624 ns | +1379 ns | +177 ns |
+| 10 records, into | 804 ns | +1460 ns | +153 ns |
+| 10 columns, into | 623 ns | +3626 ns | +469 ns |
 
-**(2) Dispatch overhead on ndarrays.** The XS dispatcher passes these
-to the Perl one, so both include the Perl dispatcher's cost:
+**(2) ndarrays**, laid out as table (1). The XS dispatcher passes
+ndarrays to the Perl one, so both include the Perl dispatcher's cost:
 
-| Case | Direct `rotq` | Perl dispatch | XS dispatch |
+| Case | `rotq` called directly | Added by Perl dispatch | Added by XS dispatch |
 |------|--------------:|--------------:|------------:|
-| N=1, quaternion as an ndarray | 1096 | +3182 | +3682 |
-| N=1, quaternion as Perl data | 1080 | +8071 | +8824 |
-| N=1000, quaternion as an ndarray | 7233 | +3042 | +4136 |
+| N=1, quaternion as an ndarray | 1.10 µs | +3.18 µs | +3.68 µs |
+| N=1, quaternion as Perl data | 1.08 µs | +8.07 µs | +8.82 µs |
+| N=1000, quaternion as an ndarray | 7.23 µs | +3.04 µs | +4.14 µs |
 
 **(3) Steps of the Perl dispatcher**, ns each, including about 25 ns
 of loop overhead:
 
-| Step | ns |
+| Step | Time |
 |------|---:|
-| call a Perl sub with three arguments | 290 |
-| `reftype` and `blessed` on an array ref | 170 |
-| records or single value? (`ref $x->[0]`) | 107 |
-| `refaddr($out) == refaddr($in)` | 133 |
-| hash slice `@{$h}{qw(x y z)}` | 300 |
-| `blessed` and `->isa('PDL')` | 323 |
-| `$out->isnull` | 169 |
-| `$out->type == PDL::double()` | 1620 |
-| `$out->get_datatype == $double` (integer) | 204 |
-| `PDL->pdl` of four numbers | 4432 |
+| call a Perl sub with three arguments | 290 ns |
+| `reftype` and `blessed` on an array ref | 170 ns |
+| records or single value? (`ref $x->[0]`) | 107 ns |
+| `refaddr($out) == refaddr($in)` | 133 ns |
+| hash slice `@{$h}{qw(x y z)}` | 300 ns |
+| `blessed` and `->isa('PDL')` | 323 ns |
+| `$out->isnull` | 169 ns |
+| `$out->type == PDL::double()` | 1620 ns |
+| `$out->get_datatype == $double` (integer) | 204 ns |
+| `PDL->pdl` of four numbers | 4432 ns |
 
 With 1000 records or columns, the differences come mostly from the
 dispatchers' kernel loops and from memory layout ([H15](#h15)), not

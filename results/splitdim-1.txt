@@ -1,0 +1,10 @@
+stack dims 3,15, product dims 1,15, split dims 3,5
+stack+splitdim matches rotq:   max |diff| = 4.4e-16
+broadcast matrices matches:    max |diff| = 4.4e-16   dims 3,5
+clump is a view (no copy):     virtual
+
+ns per quaternion (one vector, N quaternions):
+       N       rotq  matrices only  stack+x+split      broadcast x
+   1e+02       28.5         1798.1          531.8            245.1
+   1e+04        6.6           92.0          325.3             79.1
+   1e+06        5.0          252.3          381.1             60.0

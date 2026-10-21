@@ -1,0 +1,7 @@
+PDL 2.106, autopthread targ = 8, default size threshold = 1 M elements
+
+        N   default size         size 0
+    1e+03            7.5          228.5
+    1e+04            6.0           25.8
+    1e+05            6.5            4.1
+    3e+05            6.5            3.5

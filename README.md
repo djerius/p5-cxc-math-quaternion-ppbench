@@ -152,6 +152,7 @@ perl autopthread.pl  # rotq with PDL's threading threshold lowered (~20 s)
 perl dispatch-test.pl   # check the two dispatch prototypes            (~2 s)
 perl dispatch.pl        # cost of argument dispatch, Perl vs. XS       (~2 min)
 perl dispatch-parts.pl  # cost of each step of the Perl dispatcher     (~10 s)
+perl isa-bench.pl      # the isa operator vs. reftype and blessed     (~10 s)
 ```
 
 To see the effect of glibc's mmap threshold, run [mmap.pl](mmap.pl),
@@ -310,7 +311,8 @@ run, so compare ratios rather than absolute numbers.
   Perl and in XS. [dispatch-test.pl](dispatch-test.pl) checks them,
   [dispatch.pl](dispatch.pl) times them against the kernels, and
   [dispatch-parts.pl](dispatch-parts.pl) times the steps of the Perl
-  one. See [Argument dispatch](#argument-dispatch).
+  one, and [isa-bench.pl](isa-bench.pl) compares the infix `isa`
+  operator with them. See [Argument dispatch](#argument-dispatch).
 
 ### Method
 
@@ -1826,6 +1828,29 @@ of loop overhead:
 | `$out->get_datatype == $double` (integer) | 204 ns |
 | `PDL->pdl` of four numbers | 4432 ns |
 
+**(4) The infix `isa` operator** ([isa-bench.pl](isa-bench.pl); Perl
+5.36 or later), against the `reftype`, `blessed` and `->isa` calls the
+Perl dispatcher uses. The `form()` rows time the dispatcher's
+classification of one argument, as written and with `$x isa PDL`
+tested first. Times include about 14 ns of loop overhead; 3 runs,
+per-cell minimum, [results/isa-min.txt](results/isa-min.txt):
+
+| Operation | Time |
+|-----------|-----:|
+| ndarray: `blessed($x) && $x->isa('PDL')` | 175.7 ns |
+| ndarray: `$x isa PDL` | 207.6 ns |
+| array ref: `reftype($x)` and `blessed($x)` | 96.1 ns |
+| array ref: `blessed($x)` alone | 45.2 ns |
+| array ref: `$x isa PDL` (false) | 64.3 ns |
+| `form()` as written, ndarray | 423.0 ns |
+| `form()` with `isa` first, ndarray | 349.5 ns |
+| `form()` as written, single value | 359.7 ns |
+| `form()` with `isa` first, single value | 367.4 ns |
+| `form()` as written, array of values | 363.8 ns |
+| `form()` with `isa` first, array of values | 377.0 ns |
+| `form()` as written, columns | 298.6 ns |
+| `form()` with `isa` first, columns | 320.3 ns |
+
 With 1000 records or columns, the differences come mostly from the
 dispatchers' kernel loops and from memory layout ([H15](#h15)), not
 from dispatch. For example, the XS dispatcher's loop also shortens
@@ -1869,6 +1894,23 @@ PP kernel as four scalar parameters) it should cost about the same
 whether the quaternion is Perl data or an ndarray. From about 1000
 vectors (PP costs about 5–7 ns each), even 3 µs is under half the
 call, and it shrinks from there.
+
+**The `isa` operator does not help** (table (4)):
+- On an ndarray, `$x isa PDL` was about 30 ns *slower* than
+  `blessed($x) && $x->isa('PDL')`, in all three runs. That was
+  unexpected, since the operator avoids a method call; the reason was
+  not investigated.
+- On plain Perl data, `$x isa PDL` is a quick "false", but it doesn't
+  replace `reftype`, which is still needed to tell an array ref from a
+  hash ref.
+- Testing `$x isa PDL` first in `form()` saves about 74 ns for
+  ndarrays, but costs 8–22 ns on every Perl-data form. Perl data is the
+  path where dispatch overhead matters most.
+
+These differences are tens of ns, against about 290 ns for the Perl
+sub call and 1.1–1.5 µs for the whole Perl dispatcher. In the XS
+dispatcher ([C32](#c32)) the equivalent test, `SvOBJECT`, costs a few
+ns.
 
 ### Conclusions for argument dispatch
 

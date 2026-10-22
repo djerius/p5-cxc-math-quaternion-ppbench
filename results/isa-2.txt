@@ -1,0 +1,16 @@
+operation                                          ns
+empty loop                                       16.7
+ndarray: blessed($x) && $x->isa("PDL")          193.7
+ndarray: $x isa PDL                             207.6
+array ref: reftype($x) + blessed($x)             96.1
+array ref: blessed($x) alone                     45.2
+array ref: $x isa PDL (false)                    70.0
+array ref: ref($x) eq "ARRAY"                    99.5
+form(), current: ndarray                        458.0
+form(), isa first: ndarray                      373.2
+form(), current: single value                   386.7
+form(), isa first: single value                 367.4
+form(), current: array of values                363.8
+form(), isa first: array of values              377.0
+form(), current: columns                        298.6
+form(), isa first: columns                      320.3

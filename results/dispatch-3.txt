@@ -1,16 +1,16 @@
 perl 5.42.3, PDL 2.106
 
 case (ns per call)                    direct  Perl disp    XS disp |  Perl ovh    XS ovh
-single, new                              339       1630        336 |      1292        -3
-single, into                             215       1491        273 |      1276        58
-single, in place                         227       1582        295 |      1355        68
-records N=10, new                       1624       3003       1801 |      1380       177
-records N=10, into                       804       2264        957 |      1460       153
-columns N=10, into                       623       4249       1092 |      3626       470
-records N=1000, new                   183557     192123     186366 |      8565      2809
-records N=1000, into                   73747      73532      84287 |      -215     10540
-columns N=1000, into                   49055      70065      66378 |     21010     17323
-ndarray N=1, into (q Perl)              1359       9151      10087 |      7792      8728
-ndarray N=1, into (q ndarray)           1348       4784       5422 |      3436      4074
-ndarray N=1000, into (q Perl)           8006      16540      16178 |      8534      8172
-ndarray N=1000, into (q ndarray)        7233      10275      12003 |      3042      4770
+single, new                              268        785        285 |       517        17
+single, into                             181        817        227 |       636        46
+single, in place                         180        822        251 |       642        72
+records N=10, new                       1431       1935       1506 |       504        75
+records N=10, into                       689       1374        840 |       685       152
+columns N=10, into                       555       2199        903 |      1644       348
+records N=1000, new                   146977     148374     150449 |      1398      3472
+records N=1000, into                   58636      62630      70459 |      3993     11823
+columns N=1000, into                   41880      57104      54925 |     15225     13046
+ndarray N=1, into (q Perl)               890       5235       5592 |      4345      4702
+ndarray N=1, into (q ndarray)            899       1910       2425 |      1011      1526
+ndarray N=1000, into (q Perl)           6309      11090      12360 |      4782      6051
+ndarray N=1000, into (q ndarray)        7073       8454       8551 |      1381      1479

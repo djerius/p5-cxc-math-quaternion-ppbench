@@ -312,7 +312,8 @@ run, so compare ratios rather than absolute numbers.
   [dispatch.pl](dispatch.pl) times them against the kernels, and
   [dispatch-parts.pl](dispatch-parts.pl) times the steps of the Perl
   one, and [isa-bench.pl](isa-bench.pl) compares the infix `isa`
-  operator with them. See [Argument dispatch](#argument-dispatch).
+  operator with them. [qd-variants.pl](qd-variants.pl) times the
+  layouts tried for the second version of the Perl dispatcher. See [Argument dispatch](#argument-dispatch).
 
 ### Method
 
@@ -1752,11 +1753,24 @@ Two prototypes implement `rotate_vec($q, $v, [$out])` for every data
 form and output mode, with output truncation:
 
 - **Perl dispatcher, `QDispatch::rotate_vec`** ([QDispatch.pm](QDispatch.pm)).
-  It classifies arguments with `reftype`, `blessed` and a look at the
-  first element, checks the output's kind, and calls the existing
-  kernels: the XS functions for Perl data, and `rotq` for ndarrays.
-  - For ndarrays it checks that the output is `double`.
+  It classifies each argument with a single `ref`, which gives `ARRAY`
+  or `HASH` for Perl data, an empty string for a non-reference, and the
+  class name for an object. It looks at the first element of an array,
+  and branches on the result directly, most common form first. It then
+  checks the output's kind, and calls the existing kernels: the XS
+  functions for Perl data, and `rotq` for ndarrays.
+  - For ndarrays it checks that the output is `double`, by comparing
+    integer type codes.
   - It converts a quaternion given as Perl data with `PDL->pdl`.
+
+  This is the second version. The first classified each argument in a
+  separate `form()` sub with `reftype` and `blessed`, and compared PDL
+  Type objects for the `double` check. It added 1.1–1.5 µs per call on
+  single values and arrays of values, 3.6 µs on columns, and about
+  3.0–3.2 µs on ndarrays. [qd-variants.pl](qd-variants.pl) times the
+  layouts that were tried for the second version: nested blocks (used),
+  a flat sequence of statement modifiers (100–700 ns slower), and
+  using `$_[0]`… instead of copying `@_` (no consistent difference).
 - **XS dispatcher, `xsd_rotate_vec`** (in [qbench.pd](qbench.pd)). It
   does the same in C for Perl data, with its own loops (which also
   shorten each output record to three elements). Blessed arguments,
@@ -1782,9 +1796,9 @@ timed closure. [dispatch-parts.pl](dispatch-parts.pl) times the
 individual steps of the Perl dispatcher. Both were run 3 times;
 minima are in [results/dispatch-min.txt](results/dispatch-min.txt) and
 [results/dispatch-parts-min.txt](results/dispatch-parts-min.txt).
-- The load average was about 3 during these runs. In the first round,
-  the same direct `rotq` call measured 1.1 µs in one row and 1.9 µs in
-  another. These are the second round's figures.
+- The load average was about 1.5 during the [dispatch.pl](dispatch.pl)
+  runs, and about 3 during the [dispatch-parts.pl](dispatch-parts.pl)
+  runs.
 - The overheads below are the differences between the minimum times,
   in ns per call.
 
@@ -1796,24 +1810,24 @@ dispatcher adds to that:
 
 | Case | Kernel called directly | Added by Perl dispatch | Added by XS dispatch |
 |------|--------------:|--------------:|------------:|
-| single vector, new | 324 ns | +1124 ns | +12 ns |
-| single vector, into | 215 ns | +1276 ns | +58 ns |
-| single vector, in place | 227 ns | +1355 ns | +68 ns |
-| 10 records, new | 1624 ns | +1379 ns | +177 ns |
-| 10 records, into | 804 ns | +1460 ns | +153 ns |
-| 10 columns, into | 623 ns | +3626 ns | +469 ns |
+| single vector, new | 268 ns | +506 ns | +17 ns |
+| single vector, into | 181 ns | +636 ns | +46 ns |
+| single vector, in place | 180 ns | +642 ns | +71 ns |
+| array of 10 values, new | 1431 ns | +504 ns | +75 ns |
+| array of 10 values, into | 689 ns | +685 ns | +151 ns |
+| 10 columns, into | 555 ns | +1644 ns | +348 ns |
 
 **(2) ndarrays**, laid out as table (1). The XS dispatcher passes
 ndarrays to the Perl one, so both include the Perl dispatcher's cost:
 
 | Case | `rotq` called directly | Added by Perl dispatch | Added by XS dispatch |
 |------|--------------:|--------------:|------------:|
-| N=1, quaternion as an ndarray | 1.10 µs | +3.18 µs | +3.68 µs |
-| N=1, quaternion as Perl data | 1.08 µs | +8.07 µs | +8.82 µs |
-| N=1000, quaternion as an ndarray | 7.23 µs | +3.04 µs | +4.14 µs |
+| N=1, quaternion as an ndarray | 899 ns | +1011 ns | +1312 ns |
+| N=1, quaternion as Perl data | 890 ns | +4345 ns | +4702 ns |
+| N=1000, quaternion as an ndarray | 6229 ns | +1138 ns | +1575 ns |
 
-**(3) Steps of the Perl dispatcher**, ns each, including about 25 ns
-of loop overhead:
+**(3) Steps of the first Perl dispatcher**, ns each, including about
+25 ns of loop overhead:
 
 | Step | Time |
 |------|---:|
@@ -1830,7 +1844,7 @@ of loop overhead:
 
 **(4) The infix `isa` operator** ([isa-bench.pl](isa-bench.pl); Perl
 5.36 or later), against the `reftype`, `blessed` and `->isa` calls the
-Perl dispatcher uses. The `form()` rows time the dispatcher's
+first Perl dispatcher used. The `form()` rows time that version's
 classification of one argument, as written and with `$x isa PDL`
 tested first. Times include about 14 ns of loop overhead; 3 runs,
 per-cell minimum, [results/isa-min.txt](results/isa-min.txt):
@@ -1860,40 +1874,48 @@ each record. So they are left out of table (1).
 
 **[H18](#h18): Perl dispatch costs several times the work for a single vector
 (confirmed).**
-- The Perl dispatcher adds 1.1–1.5 µs per call on single values and
-  records, and 3.6 µs on columns. That is 4–6× the time XS takes to
-  rotate one vector (215–324 ns).
-- Table (3) accounts for it: about 0.3 µs for the sub call, plus 0.1–0.3
-  µs for each classification, `refaddr` or hash access. Columns cost
-  more because of the hash slices and the per-column checks.
-- The overhead stays under 10% of the work only from about 200
-  vectors: XS writing into existing records costs about 60–70 ns per
+- The first version added 1.1–1.5 µs per call on single values and
+  arrays of values, and 3.6 µs on columns, as predicted. Table (3)
+  accounts for it: about 0.3 µs for the sub call, plus 0.1–0.3 µs for
+  each classification, `refaddr` or hash access.
+- The second version adds 0.5–0.7 µs on single values and arrays of
+  values, and 1.6 µs on columns. That is less than H18 predicted, but
+  still 2–3.5× the time XS takes to rotate one vector (180–268 ns).
+  It saves the `form()` sub call, replaces `reftype` and `blessed` with
+  one `ref`, and reads the three columns directly instead of through a
+  hash slice.
+- The overhead stays under 10% of the work from about 100 vectors: XS
+  writing into existing arrays of values costs about 60–70 ns per
   vector ([C25](#c25)).
 
 **[H19](#h19): XS dispatch costs tens of ns for single values (confirmed),
 and a few hundred for columns.**
-- Single values: 12–68 ns, i.e. 5–30% of the kernel.
-- 10 records: 153–177 ns, about 10–20%. This includes shortening each
-  output record, which the direct kernel does not do.
-- 10 columns: 469 ns. Most of that is six hash lookups (three keys in,
+- Single values: 17–71 ns, i.e. 6–40% of the kernel.
+- An array of 10 values: 75–151 ns, about 5–20%. This includes
+  shortening each output record, which the direct kernel does not do.
+- 10 columns: 348 ns. Most of that is six hash lookups (three keys in,
   three out). Precomputed key hashes might reduce it; that was not
   measured.
 
-**ndarrays.** The Perl-side checks cost about 3 µs, nearly three times
-PDL's own fixed cost per call (about 1.1 µs). Two steps dominate:
+**ndarrays.** In the first version the Perl-side checks cost about 3
+µs, nearly three times PDL's own fixed cost per call. Two steps
+dominated:
 - **The type check:** comparing PDL Type objects
   (`$out->type == PDL::double()`) takes 1.6 µs. Comparing the integer
   type code (`get_datatype`) takes 0.2 µs.
 - **Converting a quaternion given as Perl data** with `PDL->pdl` takes
   4.4 µs on every call.
 
-With the integer check, the ndarray path should cost about 1.5 µs. I
-estimated that from table (3); it was not measured. Without the
-`pdl` conversion (for example, passing a single Perl quaternion to the
-PP kernel as four scalar parameters) it should cost about the same
-whether the quaternion is Perl data or an ndarray. From about 1000
-vectors (PP costs about 5–7 ns each), even 3 µs is under half the
-call, and it shrinks from there.
+The second version compares integer type codes, and its ndarray checks
+cost 1.0–1.1 µs, about the same as PDL's own cost per call
+(0.9 µs). Converting a Perl quaternion is still there, and still costs
+most of the 4.3–4.7 µs when the quaternion is Perl data. Without it
+(for example, passing a single Perl quaternion to the PP kernel as four
+scalar parameters), that case should cost about the same as an ndarray
+quaternion; that was not measured. The XS dispatcher adds another
+0.3–0.4 µs on ndarrays, for handing them to the Perl dispatcher. From
+about 1000 vectors (PP costs about 5–7 ns each), 1 µs is a small part
+of the call.
 
 **The `isa` operator does not help** (table (4)):
 - On an ndarray, `$x isa PDL` was about 30 ns *slower* than
@@ -1908,22 +1930,31 @@ call, and it shrinks from there.
   path where dispatch overhead matters most.
 
 These differences are tens of ns, against about 290 ns for the Perl
-sub call and 1.1–1.5 µs for the whole Perl dispatcher. In the XS
+sub call and 0.5–0.7 µs for the whole Perl dispatcher. The second
+version uses neither: one `ref` per argument does the classification. In the XS
 dispatcher ([C32](#c32)) the equivalent test, `SvOBJECT`, costs a few
 ns.
 
 ### Conclusions for argument dispatch
 
-- <a id="c32"></a>**C32: Write the dispatch for Perl data in XS.** In Perl it adds
-  1.1–1.5 µs per call: 4–6× the work for a single vector, and more than
-  10% until about 200 vectors. In XS it adds 12–68 ns for a single
-  vector and about 150–180 ns for 10 records. So one entry point per
+- <a id="c32"></a>**C32: Write the dispatch for Perl data in XS.** Even optimised, in
+  Perl it adds 0.5–0.7 µs per call: 2–3.5× the work for a single
+  vector, and more than 10% until about 100 vectors. In XS it adds
+  17–71 ns for a single vector and 75–151 ns for an array of 10 values. So one entry point per
   operation, as in the draft `CXC::Math::Quaternion` API, is
   affordable, provided that entry point is an XSUB.
-- <a id="c33"></a>**C33: The pure-Perl fallback can dispatch in Perl.** Its own work is
-  about 1 µs per vector ([H8](#h8)). Perl dispatch therefore roughly
-  doubles a single-vector call, but is under 10% from about 25–30
-  vectors. The fallback only runs where no compiler is available.
+- <a id="c33"></a>**C33: The pure-Perl fallback dispatches in Perl, so its dispatch
+  must be written for speed.** The module has to work without XS. Its
+  own work is about 0.5–1 µs per vector ([H8](#h8), [C28](#c28)), so
+  the second version's 0.5–0.7 µs adds about 50–70% to a
+  single-vector call, and is under 10% from about 10–15 vectors. What
+  made the difference:
+  - one `ref` per argument, not `reftype` and `blessed`;
+  - no separate classification sub;
+  - branching directly on the `ref` result, most common form first,
+    in nested blocks rather than a flat sequence of conditions;
+  - direct hash lookups rather than hash slices;
+  - integer type codes for the ndarray check.
 - <a id="c34"></a>**C34: Keep the ndarray path's checks cheap.**
   - Compare integer type codes, not PDL Type objects (0.2 against
     1.6 µs).
@@ -1932,8 +1963,9 @@ ns.
     XSUB recognise ndarrays and call the PP kernel's C function
     directly.
 
-  With those changes the estimated overhead, about 1.5 µs, is close to
-  PDL's own per-call cost, and negligible from about 1000 vectors.
+  With the integer type check the measured overhead is 1.0–1.1 µs,
+  about PDL's own per-call cost, and small from about 1000 vectors.
+  The `pdl` conversion is still to do.
 
 ## Caveats and open questions
 

@@ -15,7 +15,7 @@ my $ref = unpdl(rotq(pdl(@q), $vp));
 my $col_ref = { x => [ map { $_->[0] } @$ref ], y => [ map { $_->[1] } @$ref ], z => [ map { $_->[2] } @$ref ] };
 my $col_ok = sub { my ($h) = @_; close_enough([ @{$h}{qw(x y z)} ], [ @{$col_ref}{qw(x y z)} ]) && @{ $h->{x} } == 7 };
 
-for my $d ([ perl => \&QDispatch::rotate_vec ], [ xs => \&QBench::xsd_rotate_vec ]) {
+for my $d ([ perl => \&QDispatch::rotate_vec ], [ xs => \&QBench::xsd_rotate_vec ], [ xs2 => \&QBench::xsd2_rotate_vec ]) {
     my ($name, $f) = @$d;
     # single vector
     ok(close_enough($f->(\@q, $aoa->[0]), $ref->[0]), "$name single new");
@@ -26,7 +26,7 @@ for my $d ([ perl => \&QDispatch::rotate_vec ], [ xs => \&QBench::xsd_rotate_vec
     ok(close_enough($f->(\@q, $aoa), $ref), "$name records new");
     my @ro = map { [ 1, 2, 3 ] } 1..9; $f->(\@q, $aoa, \@ro);
     ok(@ro == 7 && close_enough(\@ro, $ref), "$name records into, outer truncated");
-    if ($name eq 'xs') {   # the Perl prototype calls the old kernel, which does not shorten inner records
+    if ($name =~ /^xs/) {   # the Perl prototype calls the old kernel, which does not shorten inner records
         my @r4 = map { [ 1, 2, 3, 4 ] } 1..7; $f->(\@q, $aoa, \@r4);
         ok(!grep({ @$_ != 3 } @r4) && close_enough(\@r4, $ref), "$name records into, inner records truncated");
     }

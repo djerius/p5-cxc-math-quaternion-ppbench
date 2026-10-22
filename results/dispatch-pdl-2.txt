@@ -1,0 +1,9 @@
+perl 5.42.3, PDL 2.106
+
+case (ns per call)                 direct      Perl   XS call    XS ptr | Perl ovh   XS ovh  ptr ovh
+N=1, into, quaternion as ndarray     1024      2073      2375      1097 |     1049     1351       73
+N=1, into, quaternion as Perl data     1035      6078      6424      1764 |     5042     5388      728
+N=1, new, quaternion as ndarray      1620      2409      2664      1699 |      788     1043       79
+N=1000, into, quaternion as ndarray     6888      8155      8717      6984 |     1267     1829       96
+N=1000, into, quaternion as Perl data     6880     12191     12827      7705 |     5310     5947      825
+N=1000, new, quaternion as ndarray     8363      9244      9713      8380 |      881     1351       17

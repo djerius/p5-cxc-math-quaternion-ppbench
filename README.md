@@ -153,6 +153,7 @@ perl dispatch-test.pl   # check the two dispatch prototypes            (~2 s)
 perl dispatch.pl        # cost of argument dispatch, Perl vs. XS       (~2 min)
 perl dispatch-parts.pl  # cost of each step of the Perl dispatcher     (~10 s)
 perl isa-bench.pl      # the isa operator vs. reftype and blessed     (~10 s)
+perl dispatch-pdl.pl   # ndarrays: Perl, XS -> Perl, XS -> C pointer  (~40 s)
 ```
 
 To see the effect of glibc's mmap threshold, run [mmap.pl](mmap.pl),
@@ -313,7 +314,9 @@ run, so compare ratios rather than absolute numbers.
   [dispatch-parts.pl](dispatch-parts.pl) times the steps of the Perl
   one, and [isa-bench.pl](isa-bench.pl) compares the infix `isa`
   operator with them. [qd-variants.pl](qd-variants.pl) times the
-  layouts tried for the second version of the Perl dispatcher. See [Argument dispatch](#argument-dispatch).
+  layouts tried for the second version of the Perl dispatcher, and
+  [dispatch-pdl.pl](dispatch-pdl.pl) times the ways the XS dispatcher
+  can handle ndarrays. See [Argument dispatch](#argument-dispatch).
 
 ### Method
 
@@ -471,7 +474,7 @@ $`10^7`$ (≈ 16–20 ns). Three measurements isolate the cause:
 
 ## Conclusions
 
-Conclusions are numbered [C1](#c1)–[C34](#c34) through the whole
+Conclusions are numbered [C1](#c1)–[C35](#c35) through the whole
 document, like the hypotheses ([H1](#h1)–[H19](#h19)), so later
 sections can refer to earlier ones.
 
@@ -1775,14 +1778,28 @@ form and output mode, with output truncation:
   does the same in C for Perl data, with its own loops (which also
   shorten each output record to three elements). Blessed arguments,
   ndarrays or objects, are passed to the Perl dispatcher with `call_pv`.
+- **XS dispatcher with a C hook, `xsd2_rotate_vec`**, an alias of
+  `xsd_rotate_vec` that differs only for ndarrays. The PDL side of the
+  module provides a C function, `qb_pp_rotate_vec`, that does the
+  Perl dispatcher's ndarray work without Perl:
+  - it builds a `(4)` ndarray directly when the quaternion is Perl data;
+  - it creates a null output when none is given;
+  - it checks the output's type field and null flag;
+  - it calls the kernel's generated C function, `pdl_run_rotq`.
+
+  At load time, the module's BOOT code stores the function's address in
+  `$QBench::PP_ROTATE_VEC`, as PDL publishes its Core struct in
+  `$PDL::SHARE`. `xsd2_rotate_vec` reads that pointer once and calls
+  through it; it uses no PDL API itself. That is how a PDL-free XS
+  module could hand ndarrays to an optional PDL part.
 
 Both look only at the top level and the first element. Checking every
 record is left to the kernel's loop, which reads every element anyway.
 That keeps dispatch a fixed cost per call. In both prototypes the
 quaternion must be a single value.
 
-[dispatch-test.pl](dispatch-test.pl) checks both dispatchers against
-the kernels; all 33 checks pass:
+[dispatch-test.pl](dispatch-test.pl) checks the three dispatchers
+against the kernels; all 50 checks pass:
 - every form and output mode, with truncation;
 - in place, including an ndarray passed as both input and output to
   `rotq`;
@@ -1865,6 +1882,22 @@ per-cell minimum, [results/isa-min.txt](results/isa-min.txt):
 | `form()` as written, columns | 298.6 ns |
 | `form()` with `isa` first, columns | 320.3 ns |
 
+**(5) ndarrays, all four paths** ([dispatch-pdl.pl](dispatch-pdl.pl)),
+laid out as table (1): the time of `rotq` called directly (with the
+quaternion already an ndarray), and what each dispatcher adds. "XS →
+Perl" is `xsd_rotate_vec`; "XS → C" is `xsd2_rotate_vec`. 3 runs,
+per-cell minimum, load average about 1.1:
+[results/dispatch-pdl-min.txt](results/dispatch-pdl-min.txt).
+
+| Case | `rotq` called directly | Added by Perl dispatch | Added by XS → Perl | Added by XS → C |
+|------|--------------:|--------------:|------------:|------------:|
+| N=1, into, quaternion as an ndarray | 949 ns | +869 ns | +1167 ns | +113 ns |
+| N=1, into, quaternion as Perl data | 913 ns | +4303 ns | +4605 ns | +667 ns |
+| N=1, new, quaternion as an ndarray | 1429 ns | +629 ns | +926 ns | +137 ns |
+| N=1000, into, quaternion as an ndarray | 6527 ns | +1597 ns | +1720 ns | +54 ns |
+| N=1000, into, quaternion as Perl data | 6322 ns | +4666 ns | +5193 ns | +957 ns |
+| N=1000, new, quaternion as an ndarray | 7736 ns | +1074 ns | +1515 ns | +306 ns |
+
 With 1000 records or columns, the differences come mostly from the
 dispatchers' kernel loops and from memory layout ([H15](#h15)), not
 from dispatch. For example, the XS dispatcher's loop also shortens
@@ -1912,10 +1945,17 @@ cost 1.0–1.1 µs, about the same as PDL's own cost per call
 most of the 4.3–4.7 µs when the quaternion is Perl data. Without it
 (for example, passing a single Perl quaternion to the PP kernel as four
 scalar parameters), that case should cost about the same as an ndarray
-quaternion; that was not measured. The XS dispatcher adds another
-0.3–0.4 µs on ndarrays, for handing them to the Perl dispatcher. From
-about 1000 vectors (PP costs about 5–7 ns each), 1 µs is a small part
-of the call.
+quaternion; that was not measured.
+
+Handing ndarrays from the XS dispatcher back to the Perl one adds
+another 0.3–0.5 µs (table (5)). Calling the PDL side's C function
+through the published pointer instead adds only 54–306 ns, mostly
+54–137 ns, with the quaternion as an ndarray. That is about what XS
+dispatch costs on Perl data. With the quaternion as Perl data,
+building the `(4)` ndarray in C costs 0.7–1.0 µs, against 4.3–4.7 µs
+through `PDL->pdl`. What remains is the cost of creating a PDL object,
+which only a kernel taking the four numbers as scalar parameters would
+avoid. 200 000 calls of each mode showed no memory growth.
 
 **The `isa` operator does not help** (table (4)):
 - On an ndarray, `$x isa PDL` was about 30 ns *slower* than
@@ -1959,13 +1999,19 @@ ns.
   - Compare integer type codes, not PDL Type objects (0.2 against
     1.6 µs).
   - Don't convert a Perl quaternion with `pdl` on every call (4.4 µs).
-    Pass it to the kernel as scalar parameters instead, or have the
-    XSUB recognise ndarrays and call the PP kernel's C function
-    directly.
+    Build the `(4)` ndarray in C (0.7–1.0 µs, [C35](#c35)), or pass
+    the four numbers to the kernel as scalar parameters.
 
-  With the integer type check the measured overhead is 1.0–1.1 µs,
-  about PDL's own per-call cost, and small from about 1000 vectors.
-  The `pdl` conversion is still to do.
+  With the integer type check, the Perl dispatcher's overhead is
+  1.0–1.1 µs, about PDL's own per-call cost.
+- <a id="c35"></a>**C35: The XS module should reach the PDL side through a C function
+  pointer, not through Perl.** The PDL part publishes the address of a
+  C function at load time, as PDL does with `$PDL::SHARE`. The XS
+  dispatcher calls through it when it sees an ndarray, and croaks if
+  the PDL part isn't loaded. That keeps the XS part free of PDL, and
+  dispatching an ndarray then costs about as much as dispatching Perl
+  data: 54–137 ns in most cases, against 0.9–1.7 µs for handing it
+  back to Perl.
 
 ## Caveats and open questions
 

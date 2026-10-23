@@ -1,0 +1,9 @@
+instructions per call; callgrind, PERL_HASH_SEED=0 PERL_PERTURB_KEYS=0
+case                         kernel          xsd           qd     qd-xsd
+single into                    2226         2461         2838        377
+single new                     2945         3102         3480        378
+1000 values into             610449       649753       687046      37293
+1000 values in place         609513       648817       686111      37294
+1000 values new             1418577      1422742      1452120      29378
+1000 columns into            445769       455366       503941      48575
+1000 columns new             599949       607379       648361      40982

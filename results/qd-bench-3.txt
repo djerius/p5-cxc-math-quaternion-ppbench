@@ -1,0 +1,40 @@
+perl 5.42.3, PDL 2.106
+
+(1) rotate_vec on Perl data
+case (ns per call)                 kernel        xsd         qd
+single, new                        378 ns     512 ns     533 ns
+single, into                       316 ns     335 ns     369 ns
+single, in place                   247 ns     353 ns     385 ns
+10 values, new                    2124 ns    2402 ns    2280 ns
+10 values, into                    953 ns     983 ns    1217 ns
+10 values, in place                977 ns    1176 ns    1276 ns
+10 columns, new                   1374 ns    1778 ns    1861 ns
+10 columns, into                   866 ns    1137 ns    1337 ns
+10 columns, in place               974 ns    1277 ns    1152 ns
+1000 values, new                173025 ns  154263 ns  158892 ns
+1000 values, into                68777 ns   69848 ns   79926 ns
+1000 values, in place            68648 ns   69998 ns   77169 ns
+1000 columns, new                66504 ns   67555 ns   78228 ns
+1000 columns, into               59727 ns   57434 ns   61689 ns
+1000 columns, in place           44560 ns   47892 ns   58404 ns
+
+(2) rotate_vec on ndarrays
+case (ns per call)                   rotq       xsd2         qd
+N=1, into, q ndarray              1017 ns    1204 ns    1268 ns
+N=1, into, q Perl                            1716 ns    1773 ns
+N=1, new, q ndarray               1606 ns    1698 ns    1730 ns
+N=1000, into, q ndarray           6437 ns    6550 ns    6652 ns
+N=1000, into, q Perl                         7752 ns    7790 ns
+N=1000, new, q ndarray            7972 ns    8124 ns    8122 ns
+
+(3) the other operations through the engine
+case (ns per call)              PP kernel         qd
+mult, single x single                         367 ns
+mult, 10 values x single                     1816 ns
+pow, single, t number                         354 ns
+pow, single, 10 t values                     1949 ns
+to_matrix, single                             564 ns
+to_matrix, 10 values                         4688 ns
+mult, ndarray N=1000              8484 ns    8940 ns
+pow, ndarray N=1000              52523 ns   53143 ns
+to_matrix, ndarray N=1000        10309 ns   10117 ns

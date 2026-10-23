@@ -72,6 +72,13 @@ I (Claude) wrote the code and this README.  Guidance was provided by Diab Jerius
   - [Results](#results-7)
   - [Analysis](#analysis-7)
   - [Conclusions for argument dispatch](#conclusions-for-argument-dispatch)
+- [Generic dispatch engine](#generic-dispatch-engine)
+  - [Question](#question-6)
+  - [Hypotheses](#hypotheses-7)
+  - [Benchmark (qd-test.pl, qd-bench.pl, ir-case.pl)](#benchmark-qd-testpl-qd-benchpl-ir-casepl)
+  - [Results](#results-8)
+  - [Analysis](#analysis-8)
+  - [Conclusions for the generic dispatch engine](#conclusions-for-the-generic-dispatch-engine)
 - [Caveats and open questions](#caveats-and-open-questions)
 
 These benchmarks were run to help design `CXC::Math::Quaternion`. The
@@ -154,6 +161,11 @@ perl dispatch.pl        # cost of argument dispatch, Perl vs. XS       (~2 min)
 perl dispatch-parts.pl  # cost of each step of the Perl dispatcher     (~10 s)
 perl isa-bench.pl      # the isa operator vs. reftype and blessed     (~10 s)
 perl dispatch-pdl.pl   # ndarrays: Perl, XS -> Perl, XS -> C pointer  (~40 s)
+perl qd-test.pl        # check the generic dispatch engine            (~5 s)
+perl qd-bench.pl       # the engine vs. the hand-written dispatchers  (~40 s)
+PERL_HASH_SEED=0 PERL_PERTURB_KEYS=0 \
+  valgrind --tool=callgrind --callgrind-out-file=/dev/null \
+  "$(plenv which perl)" ir-case.pl '1000 values into' qd 20   # instruction count
 ```
 
 To see the effect of glibc's mmap threshold, run [mmap.pl](mmap.pl),
@@ -317,6 +329,13 @@ run, so compare ratios rather than absolute numbers.
   layouts tried for the second version of the Perl dispatcher, and
   [dispatch-pdl.pl](dispatch-pdl.pl) times the ways the XS dispatcher
   can handle ndarrays. See [Argument dispatch](#argument-dispatch).
+- [qdispatch.h](qdispatch.h) is a generic, table-driven dispatch
+  engine for all XS entry points, prototyped for four operations
+  (`qd_rotate_vec`, `qd_mult`, `qd_pow`, `qd_to_matrix` in
+  [qbench.pd](qbench.pd)). [qd-test.pl](qd-test.pl) checks it,
+  [qd-bench.pl](qd-bench.pl) times it, and [ir-case.pl](ir-case.pl)
+  runs one case for counting instructions with `callgrind`. See
+  [Generic dispatch engine](#generic-dispatch-engine).
 
 ### Method
 
@@ -474,8 +493,8 @@ $`10^7`$ (≈ 16–20 ns). Three measurements isolate the cause:
 
 ## Conclusions
 
-Conclusions are numbered [C1](#c1)–[C35](#c35) through the whole
-document, like the hypotheses ([H1](#h1)–[H19](#h19)), so later
+Conclusions are numbered [C1](#c1)–[C38](#c38) through the whole
+document, like the hypotheses ([H1](#h1)–[H21](#h21)), so later
 sections can refer to earlier ones.
 
 - <a id="c1"></a>**C1: Write the `CXC::Math::Quaternion` vector core in PDL::PP.** It is
@@ -2012,6 +2031,245 @@ ns.
   dispatching an ndarray then costs about as much as dispatching Perl
   data: 54–137 ns in most cases, against 0.9–1.7 µs for handing it
   back to Perl.
+
+## Generic dispatch engine
+
+### Question
+
+The XS dispatcher prototype, `xsd_rotate_vec`, tangles three
+independent decisions:
+- the data form of each argument;
+- the output mode (new, into a caller's container, or in place);
+- the calculation.
+
+Each form has its own loop, and each loop has its own new-or-into
+branches. The column keys are written out by hand, and the quaternion
+is limited to a single value. The full API has about 16 entry points,
+and copying that structure 16 times is not maintainable.
+
+Every operation in the API is element by element, with fixed-shape
+inputs and a fixed-shape output. For example, `quat_rotate_vec` takes
+q (4) and v (3) and gives v (3); `quat_pow` takes q (4) and t () and
+gives q (4); `quat_to_matrix` takes q (4) and gives T (3,3). Can one
+engine, driven by a table of operation descriptors, dispatch all of
+them, and at what cost compared with the hand-written dispatcher?
+
+### Hypotheses
+
+- <a id="h20"></a>**H20: a table-driven engine can dispatch every operation correctly,
+  within about 10% of the hand-written dispatcher per element.** Its
+  Perl API calls per element are the same. What it adds is reading
+  the forms, shapes and kernel from the descriptor.
+- <a id="h21"></a>**H21: what generality costs is in the element loop, and making
+  each operation's shapes and kernel compile-time constants recovers
+  most of it,** without specialising for each combination of forms.
+
+### Benchmark ([qd-test.pl](qd-test.pl), [qd-bench.pl](qd-bench.pl), [ir-case.pl](ir-case.pl))
+
+The engine is [qdispatch.h](qdispatch.h). It uses only the Perl API,
+so it could live in a PDL-free XS module.
+- **Descriptors.** Each operation is a `qd_op`, holding:
+  - its input and output shapes: rank (0 for a scalar, 1 for a vector,
+    2 for a 3×3 matrix), number of components, and column keys;
+  - the input whose form the result takes;
+  - which inputs may also be the output;
+  - its element loop;
+  - its index into the PDL side's table.
+- **One dispatcher, `qd_dispatch`,** does every step for every
+  operation:
+  - **Classify each input** from how deeply its first element is
+    nested, compared with the input's rank. That tells three numbers
+    (rank 0, an array of values) from one vector (rank 1, a single
+    value), and handles matrices.
+  - **Hand ndarrays to the PDL side** through one published pointer
+    ([C35](#c35)).
+  - **Check lengths and choose the result's form.**
+  - **Prepare the output** (new, into a caller's container, or in
+    place) and check in place.
+  - **Run the element loop,** then truncate the output.
+- **Readers and writers.** There is one reader and one writer per form.
+  Outputs the engine created itself take a fast path: new scalars are
+  stored directly, with no lookups.
+- **The PDL side** is one generic function. It builds ndarrays for
+  single Perl inputs, creates or checks the output, and calls the
+  operation's generated `pdl_run_*` through a table.
+- **One XSUB serves all operations,** aliased per operation:
+  `RETVAL = qd_dispatch(aTHX_ &qd_ops[ix], &ST(0), items)`.
+
+The prototype covers four operations, chosen so that between them they
+exercise every variation:
+- `qd_rotate_vec`: a vector result, in place on the vectors;
+- `qd_mult`: two quaternions, in place on either;
+- `qd_pow`: a scalar input;
+- `qd_to_matrix`: a 3×3 matrix result.
+
+Their kernels are in [qrot.h](qrot.h), shared with three new PP
+kernels (`qmult`, `qpow`, `q2mat`) in [qbench.pd](qbench.pd).
+
+[qd-test.pl](qd-test.pl) makes 100 checks, against the PP kernels and
+against identities (rotating by $`q_1 q_2`$ is rotating by $`q_2`$ then
+$`q_1`$; `pow(q, 2)` is `mult(q, q)`; $`T \cdot v`$ is
+`rotate_vec(q, v)`):
+- every combination of input forms;
+- every output mode, including truncation and leaving other hash keys
+  alone;
+- the ndarray path, and the errors.
+
+Breaking the multiplication kernel on purpose made 22 checks fail.
+100 000 calls of each mode showed no memory growth.
+
+Small differences at the C level were measured as **instruction
+counts**, with `callgrind`. [ir-case.pl](ir-case.pl) runs one case
+2000 times (20 times for 1000 vectors), and the count for zero calls
+is subtracted. The machine's load average was 2–6 during this work, so
+wall time varied by about ±15%, but instruction counts are exact.
+They are only repeatable with Perl's hash randomisation off
+(`PERL_HASH_SEED=0 PERL_PERTURB_KEYS=0`); without that, the same code
+varied by up to 21 instructions per vector. Wall time was measured
+with [qd-bench.pl](qd-bench.pl), 3 runs, per-cell minimum.
+
+### Results
+
+**(1) Instructions per call, `quat_rotate_vec` on Perl data**
+([results/ir-counts.txt](results/ir-counts.txt)). "kernel" is the XS
+kernel called directly, `xsd` the hand-written dispatcher, `qd` the
+engine:
+
+| Case | kernel | `xsd` | `qd` | `qd` − `xsd` |
+|------|-------:|------:|-----:|-------------:|
+| single value, into | 2226 instr | 2461 instr | 2838 instr | +377 instr |
+| single value, new | 2945 instr | 3102 instr | 3480 instr | +378 instr |
+| 1000 values, into | 610 449 instr | 649 753 instr | 687 046 instr | +37 293 instr |
+| 1000 values, in place | 609 513 instr | 648 817 instr | 686 111 instr | +37 294 instr |
+| 1000 values, new | 1 418 577 instr | 1 422 742 instr | 1 452 120 instr | +29 378 instr |
+| 1000 columns, into | 445 769 instr | 455 366 instr | 503 941 instr | +48 575 instr |
+| 1000 columns, new | 599 949 instr | 607 379 instr | 648 361 instr | +40 982 instr |
+
+**(2) How the engine got there:** extra instructions per vector over
+`xsd`, for 1000 values written into an existing array, at each step.
+The first figure was measured before the hash seed was fixed, so it is
+accurate to a few instructions.
+
+| Version of the engine | Extra per vector | Shared object |
+|-----------------------|-----------------:|--------------:|
+| one shared loop; kernel called through a pointer; helpers left to the compiler | +119 instr | 104 KB |
+| helpers forced inline; a copy of the loop for each combination of forms | +54 instr | 174 KB |
+| helpers forced inline; one shared loop | +74 instr | 106 KB |
+| one loop per operation, kernel inlined | +82 instr | 129 KB |
+| … and local copies of the operands | +63 instr | 129 KB |
+| … and the operation's shapes as constants (final) | +37 instr | 112 KB |
+
+Profiling inside the XSUBs showed that both dispatchers make the same
+Perl API calls per vector (`av_fetch` 256, `sv_setnv` 94, `av_fill`
+32, `av_extend` 46 instructions). The differences were all in the
+engine's own code.
+
+**(3) Wall time, final version**
+([results/qd-bench-min.txt](results/qd-bench-min.txt)), ns per call.
+`quat_rotate_vec` on Perl data:
+
+| Case | kernel | `xsd` | `qd` |
+|------|-------:|------:|-----:|
+| single value, new | 378 ns | 512 ns | 533 ns |
+| single value, into | 316 ns | 335 ns | 369 ns |
+| single value, in place | 247 ns | 353 ns | 385 ns |
+| 1000 values, new | 173 025 ns | 154 263 ns | 158 892 ns |
+| 1000 values, into | 68 777 ns | 69 848 ns | 79 926 ns |
+| 1000 values, in place | 68 648 ns | 69 998 ns | 77 169 ns |
+| 1000 columns, new | 66 504 ns | 67 555 ns | 78 228 ns |
+| 1000 columns, into | 59 727 ns | 57 434 ns | 61 689 ns |
+| 1000 columns, in place | 44 560 ns | 47 892 ns | 58 404 ns |
+
+On ndarrays, against `rotq` called directly and the hand-written
+`xsd2` ([C35](#c35)):
+
+| Case | `rotq` | `xsd2` | `qd` |
+|------|-------:|-------:|-----:|
+| N=1, into, quaternion as an ndarray | 1017 ns | 1204 ns | 1268 ns |
+| N=1, into, quaternion as Perl data | — | 1716 ns | 1773 ns |
+| N=1, new, quaternion as an ndarray | 1606 ns | 1698 ns | 1730 ns |
+| N=1000, into, quaternion as an ndarray | 6437 ns | 6550 ns | 6652 ns |
+| N=1000, into, quaternion as Perl data | — | 7752 ns | 7790 ns |
+| N=1000, new, quaternion as an ndarray | 7972 ns | 8124 ns | 8122 ns |
+
+The other three operations, through the engine. The ndarray rows
+compare with the PP kernel called directly:
+
+| Case | PP kernel | `qd` |
+|------|----------:|-----:|
+| mult, single value × single value | — | 367 ns |
+| mult, 10 values × single value | — | 1816 ns |
+| pow, single value, t a number | — | 354 ns |
+| pow, single value, 10 t values | — | 1949 ns |
+| to_matrix, single value | — | 564 ns |
+| to_matrix, 10 values | — | 4688 ns |
+| mult, ndarray N=1000 | 8484 ns | 8940 ns |
+| pow, ndarray N=1000 | 52 523 ns | 53 143 ns |
+| to_matrix, ndarray N=1000 | 10 309 ns | 10 117 ns |
+
+### Analysis
+
+**[H20](#h20): one table-driven engine dispatches every operation correctly
+(confirmed), and per element it is within 2–11% of the hand-written
+dispatcher (confirmed, after tuning).**
+- All 100 checks pass for the four operations, across every input
+  form, output mode and error.
+- Per vector, the final engine executes 29–37 more instructions than
+  `xsd` for arrays of values (2–6%), and 41–49 more for columns
+  (7–11%). Per call it adds about 380 instructions: 10–40 ns for a
+  single value.
+- On the wall clock, at 1000 values it is within 3% for new outputs,
+  and 10–14% slower writing into an existing array or in place. For
+  columns it is 7% slower writing into an existing output, 16% for
+  new and 22% in place.
+- On ndarrays it matches `xsd2` within noise. For the other
+  operations it matches the PP kernels within noise.
+
+**[H21](#h21): the cost of generality is in the element loop, and constants
+per operation recover most of it (confirmed).** Table (2):
+- **The helpers were the largest cost.** Left to itself, the compiler
+  made the per-element helpers (reading a value, writing a value,
+  finding an output slot) into separate functions. Forcing them
+  inline saved about 45–65 instructions per vector.
+- **"New output" was slow as written.** Treating it as "into an empty
+  container" sent every element through the reuse path. A fast path
+  for containers the engine created brought a new array of 1000
+  values from +65% to within the noise of `xsd`.
+- **Specialising by form wasn't worth it.** A copy of the loop for each
+  combination of forms saved only about 10 instructions per vector
+  (2%). It cost 37–41 more per call for single values, and 66 KB of
+  code.
+- **The kernel pointer wasn't the problem on its own.** Inlining the
+  kernel by giving each operation its own loop made no difference
+  until the loop could also see its data as local and constant:
+  - local copies of the operands, so the compiler need not reload them
+    after every Perl API call: −19 instructions per vector;
+  - the operation's shapes as compile-time constants, so the loops over
+    components unroll and the rank tests vanish: −26 more.
+- **Constant shapes exposed a latent bug.** With a constant matrix
+  shape, the compiler warned that a column loop could index past the
+  4-element column table. It couldn't happen at run time, because
+  matrices are rejected for columns earlier, but every loop over
+  columns is now bounded by the number of columns the shape can have.
+
+### Conclusions for the generic dispatch engine
+
+- <a id="c36"></a>**C36: Use one table-driven dispatch engine for all the XS entry
+  points.** Each operation is a descriptor: its input and output
+  shapes, the input whose form the result takes, an in-place mask, its
+  element loop, and its PDL-side index. One dispatcher and one aliased
+  XSUB serve all of them. Adding an operation means writing a kernel, a
+  loop line and a table row. Per element it costs within 2–11% of a
+  hand-written dispatcher, plus about 380 instructions per call.
+- <a id="c37"></a>**C37: Give each operation its own element loop, with its kernel and
+  shapes as compile-time constants, and force the per-element helpers
+  inline.** Generate the loops from one macro (`QD_DEFINE_RUN`) taking
+  the same shape initialisers as the descriptor. Don't specialise for
+  combinations of forms; the gain is too small for the code it adds.
+- <a id="c38"></a>**C38: Measure small C-level differences as instruction counts, not
+  wall time,** on a shared machine: `callgrind`, with the empty run
+  subtracted, and with Perl's hash randomisation off for repeatable
+  counts. Use wall time to confirm the final result.
 
 ## Caveats and open questions
 
